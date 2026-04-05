@@ -40,9 +40,21 @@ export default function Dashboard() {
     const [showAddModal, setShowAddModal] = useState(false);
 
     // New Account Form State
-    const [newAcc, setNewAcc] = useState({ username: '', password: '', email: '', proxyHost: '', proxyPort: '', type: 'MAIN' });
+    const [newAcc, setNewAcc] = useState({ 
+        username: '', password: '', email: '', 
+        proxyHost: '', proxyPort: '', proxyUsername: '', proxyPassword: '', 
+        type: 'MAIN' 
+    });
 
     useEffect(() => {
+        const savedPlatform = localStorage.getItem('nexus_platform') as 'INSTAGRAM' | 'TWITTER';
+        if (savedPlatform && (savedPlatform === 'INSTAGRAM' || savedPlatform === 'TWITTER')) {
+            setPlatform(savedPlatform);
+        }
+    }, []);
+
+    useEffect(() => {
+        localStorage.setItem('nexus_platform', platform);
         fetchAccounts(platform);
     }, [platform]);
 
@@ -83,11 +95,16 @@ export default function Dashboard() {
                 password: newAcc.password,
                 email: newAcc.email,
                 type: newAcc.type,
-                proxy: { host: newAcc.proxyHost, port: newAcc.proxyPort }
+                proxy: newAcc.proxyHost ? { 
+                    host: newAcc.proxyHost, 
+                    port: newAcc.proxyPort,
+                    username: newAcc.proxyUsername,
+                    password: newAcc.proxyPassword
+                } : undefined
             })
         });
         setShowAddModal(false);
-        setNewAcc({ username: '', password: '', email: '', proxyHost: '', proxyPort: '', type: 'MAIN' });
+        setNewAcc({ username: '', password: '', email: '', proxyHost: '', proxyPort: '', proxyUsername: '', proxyPassword: '', type: 'MAIN' });
         fetchAccounts(platform);
     };
 
@@ -162,9 +179,9 @@ export default function Dashboard() {
                     <div>
                         <h2 className="text-2xl font-semibold tracking-tight flex items-center gap-3">
                             {platform === 'TWITTER' ? (
-                                <><Twitter className="text-blue-400" /> Duupflow <span className="font-light text-blue-400">X-Automation</span></>
+                                <span key="twitter-title" className="flex items-center gap-3"><Twitter className="text-blue-400" /> Duupflow <span className="font-light text-blue-400">X-Automation</span></span>
                             ) : (
-                                <><Instagram className="text-pink-500" /> Duupflow <span className="font-light text-pink-500">Insta-Bot</span></>
+                                <span key="insta-title" className="flex items-center gap-3"><Instagram className="text-pink-500" /> Duupflow <span className="font-light text-pink-500">Insta-Bot</span></span>
                             )}
                         </h2>
                         <p className="text-xs text-white/40 mt-1 flex items-center gap-2 uppercase tracking-widest">
@@ -364,7 +381,10 @@ export default function Dashboard() {
             {/* Add Account Modal */}
             <AnimatePresence>
                 {showAddModal && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
+                    <motion.div 
+                        key="modal-wrapper"
+                        className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md"
+                    >
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
@@ -417,13 +437,17 @@ export default function Dashboard() {
                                 
                                 <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl space-y-4">
                                     <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-white/50">
-                                        <Server size={14} /> Network Configuration
+                                        <Server size={14} /> Network Configuration (Proxy)
                                     </div>
                                     <div className="grid grid-cols-3 gap-4">
                                         <div className="col-span-2">
                                             <Input label="Proxy Host" value={newAcc.proxyHost} onChange={(v: string) => setNewAcc({ ...newAcc, proxyHost: v })} placeholder="192.168.1.1" />
                                         </div>
                                         <Input label="Port" value={newAcc.proxyPort} onChange={(v: string) => setNewAcc({ ...newAcc, proxyPort: v })} placeholder="8080" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <Input label="Proxy Username (Optional)" value={newAcc.proxyUsername} onChange={(v: string) => setNewAcc({ ...newAcc, proxyUsername: v })} placeholder="user123" />
+                                        <Input label="Proxy Password (Optional)" type="password" value={newAcc.proxyPassword} onChange={(v: string) => setNewAcc({ ...newAcc, proxyPassword: v })} placeholder="pass123" />
                                     </div>
                                 </div>
 
@@ -437,7 +461,7 @@ export default function Dashboard() {
                                 </motion.button>
                             </div>
                         </motion.form>
-                    </div>
+                    </motion.div>
                 )}
             </AnimatePresence>
 
@@ -547,6 +571,7 @@ function AccountCard({ account, active, onClick, onLaunch, index, platform }: { 
                     <AnimatePresence>
                         {showActions && (
                             <motion.div 
+                                key="actions-dropdown"
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
