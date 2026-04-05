@@ -79,6 +79,26 @@ app.post('/api/accounts', async (req, res) => {
 });
 
 /**
+ * Delete an account
+ */
+app.delete('/api/accounts/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        // First delete the proxy if it exists
+        const proxy = await prisma.proxy.findUnique({ where: { accountId: id } });
+        if (proxy) {
+            await prisma.proxy.delete({ where: { accountId: id } });
+        }
+        
+        // Then delete the account
+        await prisma.iGAccount.delete({ where: { id } });
+        res.json({ success: true, message: "Compte Instagram supprimé." });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
  * Trigger an automation action
  */
 app.post('/api/accounts/:id/action', async (req, res) => {
@@ -133,6 +153,26 @@ app.post('/api/twitter-accounts', async (req, res) => {
         res.status(201).json(newAccount);
     } catch (error: any) {
         res.status(400).json({ error: error.message });
+    }
+});
+
+/**
+ * Delete a Twitter account
+ */
+app.delete('/api/twitter-accounts/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        // First delete the proxy if it exists
+        const proxy = await prisma.twitterProxy.findUnique({ where: { accountId: id } });
+        if (proxy) {
+            await prisma.twitterProxy.delete({ where: { accountId: id } });
+        }
+        
+        // Then delete the account
+        await prisma.twitterAccount.delete({ where: { id } });
+        res.json({ success: true, message: "Compte Twitter supprimé." });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
     }
 });
 

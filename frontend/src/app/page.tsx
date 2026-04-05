@@ -17,7 +17,8 @@ import {
     Camera,
     RefreshCw,
     Shield,
-    Briefcase
+    Briefcase,
+    Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -28,6 +29,9 @@ interface Account {
     status: string;
     progress?: number;
     isOnline?: boolean;
+    type?: string;
+    email?: string;
+    proxy?: { host: string; port: number; username?: string; password?: string };
 }
 
 export default function Dashboard() {
@@ -35,7 +39,7 @@ export default function Dashboard() {
     const [logs, setLogs] = useState<{ username: string, message: string, timestamp?: Date }[]>([]);
     const [screenshots, setScreenshots] = useState<Record<string, string>>({});
     const [activeAccount, setActiveAccount] = useState('');
-    const [viewMode, setViewMode] = useState<'SINGLE' | 'GRID'>('SINGLE');
+    const [viewMode, setViewMode] = useState<'SINGLE' | 'GRID' | 'PROXIES' | 'ACCOUNTS'>('SINGLE');
     const [platform, setPlatform] = useState<'INSTAGRAM' | 'TWITTER'>('INSTAGRAM');
     const [showAddModal, setShowAddModal] = useState(false);
 
@@ -117,6 +121,16 @@ export default function Dashboard() {
         });
     };
 
+    const handleDeleteAccount = async (id: string) => {
+        if (!confirm("Voulez-vous vraiment détruire ce nœud de la base de données ?")) return;
+        const url = platform === 'TWITTER' ? `http://localhost:4000/api/twitter-accounts/${id}` : `http://localhost:4000/api/accounts/${id}`;
+        await fetch(url, { method: 'DELETE' });
+        
+        // Refresh UI
+        if (activeAccount && accounts.find(a => a.id === id)?.username === activeAccount) setActiveAccount('');
+        fetchAccounts(platform);
+    };
+
     const activeAccObj = accounts.find(a => a.username === activeAccount);
 
     return (
@@ -154,8 +168,8 @@ export default function Dashboard() {
                 <nav className="flex flex-col gap-6 items-center w-full relative">
                     <SidebarIcon icon={<LayoutDashboard size={22} />} active={viewMode === 'SINGLE'} onClick={() => setViewMode('SINGLE')} title="Single Node View" />
                     <SidebarIcon icon={<Monitor size={22} />} active={viewMode === 'GRID'} onClick={() => setViewMode('GRID')} title="Grid Matrix View" />
-                    <SidebarIcon icon={<Server size={22} />} title="Server Resources (Coming Soon)" />
-                    <SidebarIcon icon={<Users size={22} />} title="User Management (Coming Soon)" />
+                    <SidebarIcon icon={<Server size={22} />} active={viewMode === 'PROXIES'} onClick={() => setViewMode('PROXIES')} title="Proxy Matrix" />
+                    <SidebarIcon icon={<Users size={22} />} active={viewMode === 'ACCOUNTS'} onClick={() => setViewMode('ACCOUNTS')} title="Global Accounts" />
                     
                     <div className="w-8 h-[1px] bg-white/10 my-2" />
 
@@ -211,7 +225,7 @@ export default function Dashboard() {
                 {/* Dashboard Area */}
                 <div className="flex-1 overflow-y-auto p-8 lg:p-10 relative" style={{ scrollbarWidth: 'none' }}>
                     
-                    {viewMode === 'SINGLE' ? (
+                    {viewMode === 'SINGLE' && (
                         <div className="max-w-[1600px] mx-auto space-y-8">
                             
                             {/* Stats Overview */}
@@ -322,7 +336,9 @@ export default function Dashboard() {
                                 </div>
                             </section>
                         </div>
-                    ) : (
+                    )}
+                    
+                    {viewMode === 'GRID' && (
                         /* Multi-Spy Grid */
                         <div className="max-w-[1800px] mx-auto space-y-6">
                             <div className="flex items-center gap-3 mb-8">
@@ -374,6 +390,148 @@ export default function Dashboard() {
                                 ))}
                             </motion.div>
                         </div>
+                    )}
+
+                    {viewMode === 'PROXIES' && (
+                        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-[1600px] mx-auto space-y-6">
+                            <div className="flex items-center gap-3 mb-8">
+                                <Server className="text-violet-400" />
+                                <h3 className="text-xl font-medium text-white">Proxy Pool <span className="text-white/30 text-sm ml-2">({accounts.filter(a => a.proxy).length} Assigned)</span></h3>
+                            </div>
+                            
+                            <div className="bg-[#0A0A0B] border border-white/5 rounded-2xl overflow-hidden shadow-xl text-sm">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left whitespace-nowrap">
+                                        <thead className="text-[10px] uppercase font-semibold text-white/30 tracking-widest border-b border-white/5 bg-white/[0.02]">
+                                            <tr>
+                                                <th className="px-6 py-4">Status</th>
+                                                <th className="px-6 py-4">IP Address</th>
+                                                <th className="px-6 py-4">Port</th>
+                                                <th className="px-6 py-4">Auth</th>
+                                                <th className="px-6 py-4 text-right">Linked Node</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                            {accounts.filter(acc => acc.proxy).length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="px-6 py-12 text-center text-white/30 italic">No proxies assigned yet on this platform.</td>
+                                                </tr>
+                                            ) : (
+                                                accounts.filter(acc => acc.proxy).map((acc) => (
+                                                    <tr key={acc.id} className="hover:bg-white/[0.02] transition-colors">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.5)]" />
+                                                                <span className="text-white/60 text-xs">Healthy</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 font-mono text-white/90">{acc.proxy?.host}</td>
+                                                        <td className="px-6 py-4 font-mono text-white/50">{acc.proxy?.port}</td>
+                                                        <td className="px-6 py-4">
+                                                            {acc.proxy?.username ? (
+                                                                <span className="px-3 py-1 rounded-md bg-white/5 border border-white/10 text-xs text-white/70">Required</span>
+                                                            ) : (
+                                                                <span className="text-white/30 text-xs italic">Open</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/5">
+                                                                {platform === 'TWITTER' ? <Twitter size={12} className="text-blue-400" /> : <Instagram size={12} className="text-violet-400" />}
+                                                                <span className="text-xs font-medium">@{acc.username}</span>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {viewMode === 'ACCOUNTS' && (
+                        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-[1600px] mx-auto space-y-6">
+                            <div className="flex items-center gap-3 mb-8">
+                                <Users className="text-violet-400" />
+                                <h3 className="text-xl font-medium text-white">Accounts Registry <span className="text-white/30 text-sm ml-2">({accounts.length} Total)</span></h3>
+                            </div>
+                            
+                            <div className="bg-[#0A0A0B] border border-white/5 rounded-2xl overflow-hidden shadow-xl text-sm">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left whitespace-nowrap">
+                                        <thead className="text-[10px] uppercase font-semibold text-white/30 tracking-widest border-b border-white/5 bg-white/[0.02]">
+                                            <tr>
+                                                <th className="px-6 py-4">Account Overview</th>
+                                                {platform === 'TWITTER' && <th className="px-6 py-4">Role</th>}
+                                                <th className="px-6 py-4">Current Status</th>
+                                                <th className="px-6 py-4 text-right">Network Route</th>
+                                                <th className="px-6 py-4 text-right">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                            {accounts.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="px-6 py-12 text-center text-white/30 italic">No accounts populated. Deploy an instance first.</td>
+                                                </tr>
+                                            ) : (
+                                                accounts.map((acc) => {
+                                                    const th = getStatusColor(acc.status);
+                                                    return (
+                                                        <tr key={acc.id} className="hover:bg-white/[0.02] transition-colors">
+                                                            <td className="px-6 py-4">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className={`w-10 h-10 rounded-xl ${platform === 'TWITTER' ? 'bg-blue-500/10 text-blue-400' : 'bg-fuchsia-500/10 text-fuchsia-400'} flex items-center justify-center shrink-0`}>
+                                                                        {platform === 'TWITTER' ? <Twitter size={18} /> : <Instagram size={18} />}
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="font-semibold text-white/90">@{acc.username}</div>
+                                                                        {acc.email && <div className="text-[10px] text-white/40">{acc.email}</div>}
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            {platform === 'TWITTER' && (
+                                                                <td className="px-6 py-4">
+                                                                    <span className={`px-2.5 py-1 flex w-max items-center gap-1.5 text-[10px] uppercase font-bold rounded-md border ${acc.type === 'MAIN' ? 'bg-white/10 border-white/20 text-white' : 'bg-white/5 border-white/5 text-white/40'}`}>
+                                                                        <Briefcase size={12} /> {acc.type || 'MAIN'}
+                                                                    </span>
+                                                                </td>
+                                                            )}
+                                                            <td className="px-6 py-4">
+                                                                <span className={`px-3 py-1.5 rounded-full text-[10px] font-mono uppercase bg-black border ${th.border} ${th.dot.replace('bg-', 'text-')} font-bold tracking-wider`}>
+                                                                    {acc.status || 'UNAVAILABLE'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right">
+                                                                {acc.proxy ? (
+                                                                    <div className="flex items-center justify-end gap-2 text-white/80">
+                                                                        <Server size={14} className="text-white/30" />
+                                                                        <span className="font-mono text-xs">{acc.proxy.host}:{acc.proxy.port}</span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center justify-end gap-2 text-white/20 text-xs italic">
+                                                                        <WifiOff size={14} /> Local Network
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right">
+                                                                <button 
+                                                                    onClick={() => handleDeleteAccount(acc.id)}
+                                                                    className="p-2 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg transition-colors border border-rose-500/20 shadow-sm"
+                                                                    title="Destroy Node"
+                                                                >
+                                                                    <Trash2 size={16} />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </motion.div>
                     )}
                 </div>
             </main>
