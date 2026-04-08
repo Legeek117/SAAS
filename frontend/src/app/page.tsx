@@ -137,14 +137,23 @@ export default function Dashboard() {
     const [showPostModal, setShowPostModal] = useState(false);
     const [newPost, setNewPost] = useState({ content: '', scheduleDate: '', scheduleTime: '' });
 
+    // Auto Sequence State
+    const [autoSequenceStatus, setAutoSequenceStatus] = useState<Record<string, {
+        running: boolean;
+        currentStep: number;
+        totalSteps: number;
+        currentAction: string;
+    }>>({});
+
     // New Account Form State
     const [newAcc, setNewAcc] = useState({ 
         username: '', password: '', email: '', 
         proxyHost: '', proxyPort: '', proxyUsername: '', proxyPassword: '', 
-        type: 'MAIN', authToken: '' 
+        type: 'MAIN', authToken: '', groupId: '' 
     });
     const [twitterCookies, setTwitterCookies] = useState('');
     const [twitterCt0, setTwitterCt0] = useState('');
+    const [availableGroups, setAvailableGroups] = useState<Group[]>([]);
 
     // New Features State
     const [activeTab, setActiveTab] = useState<'dashboard' | 'groups' | 'templates' | 'activities' | 'comments' | 'notifications'>('dashboard');
@@ -174,7 +183,7 @@ export default function Dashboard() {
     }, []);
 
     useEffect(() => {
-        if (!mounted) return; // Don't run until mounted
+        if (!mounted) return;
         localStorage.setItem('nexus_platform', platform);
         fetchAccounts(platform);
     }, [platform, mounted]);
@@ -198,6 +207,11 @@ export default function Dashboard() {
             ));
         });
 
+        // Load available groups when modal opens
+        if (showAddModal) {
+            fetchGroups();
+        }
+
         // Intervalle de rafraîchissement des comptes pour plus de robustesse
         const interval = setInterval(() => {
             fetchAccounts(platform);
@@ -207,7 +221,7 @@ export default function Dashboard() {
             socket.disconnect(); 
             clearInterval(interval);
         };
-    }, [platform]);
+    }, [platform, showAddModal]);
 
     // Posts & Stats Functions
     const fetchPosts = async (accountId: string) => {
@@ -217,6 +231,21 @@ export default function Dashboard() {
             setPosts(data);
         } catch (err) {
             console.error('Failed to fetch posts:', err);
+        }
+    };
+
+    const fetchGroups = async () => {
+        try {
+            const res = await fetch('http://localhost:4000/api/groups');
+            const data = await res.json();
+            setAvailableGroups(data);
+            
+            // Auto-select first group if available
+            if (data.length > 0 && !newAcc.groupId) {
+                setNewAcc(prev => ({ ...prev, groupId: data[0].id }));
+            }
+        } catch (err) {
+            console.error('Failed to fetch groups:', err);
         }
     };
 
@@ -263,6 +292,32 @@ export default function Dashboard() {
         }
     };
 
+    const handleGroupChange = async (accountId: string, groupId: string) => {
+        try {
+            const res = await fetch(`http://localhost:4000/api/twitter-accounts/${accountId}/group`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ groupId })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'Failed to update group');
+            }
+
+            // Refresh accounts list
+            fetchAccounts(platform);
+            
+            // Show success message
+            const account = accounts.find(a => a.id === accountId);
+            const group = availableGroups.find(g => g.id === groupId);
+            alert(`✅ ${account?.username} a été déplacé vers le groupe "${group?.name}"`);
+        } catch (err) {
+            console.error('Failed to update group:', err);
+            alert('Erreur lors du changement de groupe');
+        }
+    };
+
     const fetchAccounts = async (p: string) => {
         try {
             const url = p === 'TWITTER' ? 'http://localhost:4000/api/twitter-accounts' : 'http://localhost:4000/api/accounts';
@@ -284,6 +339,13 @@ export default function Dashboard() {
 
     const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // Validate group selection
+        if (!newAcc.groupId) {
+            alert('Erreur: Vous devez sélectionner un groupe pour ce compte');
+            return;
+        }
+        
         const url = platform === 'TWITTER' ? 'http://localhost:4000/api/twitter-accounts' : 'http://localhost:4000/api/accounts';
         try {
             // For Twitter, build cookies array from simple input values
@@ -329,6 +391,7 @@ export default function Dashboard() {
                     password: newAcc.password,
                     email: newAcc.email,
                     type: newAcc.type,
+                    groupId: newAcc.groupId, // Required
                     // Twitter cookie-only authentication
                     cookies: cookiesArray,
                     // Legacy support (will be ignored for Twitter)
@@ -348,7 +411,7 @@ export default function Dashboard() {
             }
             
             setShowAddModal(false);
-            setNewAcc({ username: '', password: '', email: '', proxyHost: '', proxyPort: '', proxyUsername: '', proxyPassword: '', type: 'MAIN', authToken: '' });
+            setNewAcc({ username: '', password: '', email: '', proxyHost: '', proxyPort: '', proxyUsername: '', proxyPassword: '', type: 'MAIN', authToken: '', groupId: '' });
             setTwitterCookies('');
             setTwitterCt0('');
             fetchAccounts(platform);
@@ -357,7 +420,7 @@ export default function Dashboard() {
         }
     };
 
-    const launchAction = async (id: string, action: string) => {
+    const launchAction = async (id: string, action: string, autoSequence: boolean = false) => {
         const url = platform === 'TWITTER' ? `http://localhost:4000/api/twitter-accounts/${id}/action` : `http://localhost:4000/api/accounts/${id}/action`;
         const response = await fetch(url, {
             method: 'POST',
@@ -376,6 +439,79 @@ export default function Dashboard() {
                 fetchPosts(id);
                 fetchStats(id);
             }, 2000);
+        }
+
+        // Auto-sequence: if warmUp completed, run all other actions automatically
+        if (autoSequence && platform === 'TWITTER' && action === 'warmUp') {
+            const sequence = ['setupProfile', 'joinCommunity', 'postCommunity', 'spamComments'];
+            const actionLabels = {
+                setupProfile: 'Setup Profile',
+                joinCommunity: 'Join Communities',
+                postCommunity: 'Post Captions',
+                spamComments: 'Spam Comments'
+            };
+            const delays = [60000, 120000, 180000, 240000]; // 1min, 2min, 3min, 4min delays
+            
+            // Set sequence status
+            setAutoSequenceStatus(prev => ({
+                ...prev,
+                [id]: {
+                    running: true,
+                    currentStep: 0,
+                    totalSteps: sequence.length,
+                    currentAction: 'warmUp'
+                }
+            }));
+            
+            for (let i = 0; i < sequence.length; i++) {
+                setTimeout(async () => {
+                    const currentAction = sequence[i];
+                    console.log(`Auto-executing: ${currentAction}`);
+                    
+                    // Update status
+                    setAutoSequenceStatus(prev => ({
+                        ...prev,
+                        [id]: {
+                            running: true,
+                            currentStep: i + 1,
+                            totalSteps: sequence.length,
+                            currentAction: currentAction
+                        }
+                    }));
+                    
+                    const seqResponse = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: currentAction })
+                    });
+                    
+                    if (seqResponse.ok) {
+                        console.log(`${currentAction} queued successfully`);
+                        // Refresh stats after each action
+                        setTimeout(() => {
+                            fetchPosts(id);
+                            fetchStats(id);
+                        }, 2000);
+                    } else {
+                        console.error(`Failed to execute ${currentAction}`);
+                    }
+                    
+                    // Mark as complete if last action
+                    if (i === sequence.length - 1) {
+                        setTimeout(() => {
+                            setAutoSequenceStatus(prev => ({
+                                ...prev,
+                                [id]: {
+                                    running: false,
+                                    currentStep: sequence.length,
+                                    totalSteps: sequence.length,
+                                    currentAction: 'Complete'
+                                }
+                            }));
+                        }, 5000);
+                    }
+                }, delays[i]);
+            }
         }
     };
 
@@ -419,13 +555,9 @@ export default function Dashboard() {
 
     return (
         <div className="flex h-screen bg-[#030303] text-white font-sans selection:bg-violet-500/30 overflow-hidden font-light">
-            {/* Ambient Background Glows */}
-            {!mounted ? null : (
-                <>
-                    <div className={`absolute top-0 right-0 w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none transition-colors duration-1000 ${platform === 'TWITTER' ? 'bg-blue-600/10' : 'bg-fuchsia-600/10'}`} />
-                    <div className={`absolute bottom-0 left-0 w-[600px] h-[600px] rounded-full blur-[150px] pointer-events-none transition-colors duration-1000 ${platform === 'TWITTER' ? 'bg-cyan-900/10' : 'bg-indigo-900/10'}`} />
-                </>
-            )}
+            {/* Ambient Background Glows - suppressed hydration warning */}
+            <div className={`absolute top-0 right-0 w-[500px] h-[500px] rounded-full blur-[120px] pointer-events-none transition-colors duration-1000 ${platform === 'TWITTER' ? 'bg-blue-600/10' : 'bg-fuchsia-600/10'}`} suppressHydrationWarning />
+            <div className={`absolute bottom-0 left-0 w-[600px] h-[600px] rounded-full blur-[150px] pointer-events-none transition-colors duration-1000 ${platform === 'TWITTER' ? 'bg-cyan-900/10' : 'bg-indigo-900/10'}`} suppressHydrationWarning />
 
             {/* Sidebar */}
             <aside className="w-20 lg:w-24 border-r border-white/5 flex flex-col items-center py-8 gap-8 bg-black/40 backdrop-blur-xl z-50">
@@ -556,7 +688,7 @@ export default function Dashboard() {
                                             account={acc}
                                             active={activeAccount === acc.username}
                                             onClick={() => setActiveAccount(acc.username)}
-                                            onLaunch={(action) => launchAction(acc.id, action)}
+                                            onLaunch={(action, autoSequence) => launchAction(acc.id, action, autoSequence)}
                                             onEditProfile={() => {
                                                 // Open NewFeatures modal to edit profile
                                                 setShowNewFeatures(true);
@@ -570,6 +702,9 @@ export default function Dashboard() {
                                             }}
                                             index={i}
                                             platform={platform}
+                                            groups={availableGroups}
+                                            onGroupChange={handleGroupChange}
+                                            autoSequenceStatus={autoSequenceStatus}
                                         />
                                     ))}
                                 </AnimatePresence>
@@ -599,20 +734,33 @@ export default function Dashboard() {
                                         </div>
 
                                         {screenshots[activeAccount] ? (
-                                            <motion.img 
-                                                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                                                src={screenshots[activeAccount]} 
-                                                className="w-full h-full object-cover transition-transform duration-700" 
-                                            />
+                                            <div className="w-full h-full flex items-center justify-center bg-black/20">
+                                                <motion.img 
+                                                    key={activeAccount}
+                                                    initial={{ opacity: 0 }} 
+                                                    animate={{ opacity: 1 }}
+                                                    transition={{ duration: 0.3 }}
+                                                    src={screenshots[activeAccount]} 
+                                                    alt={`Live screenshot of @${activeAccount}`}
+                                                    className="w-full h-full object-contain" 
+                                                    onError={(e) => {
+                                                        const target = e.target as HTMLImageElement;
+                                                        target.style.display = 'none';
+                                                    }}
+                                                />
+                                            </div>
                                         ) : (
-                                            <div className="w-full h-full flex flex-col items-center justify-center gap-6 opacity-30 select-none bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]">
+                                            <div className="w-full h-full flex flex-col items-center justify-center gap-4 bg-gradient-to-br from-gray-900 to-black">
                                                 <div className="relative">
-                                                    <Monitor size={64} className="text-white/20" />
+                                                    <Monitor size={56} className="text-white/20" />
                                                     <div className="absolute inset-0 flex items-center justify-center">
-                                                        <Activity size={24} className="text-white/40 animate-pulse" />
+                                                        <Activity size={20} className="text-violet-400/60 animate-pulse" />
                                                     </div>
                                                 </div>
-                                                <span className="text-sm font-mono tracking-widest uppercase">No feed available</span>
+                                                <div className="text-center">
+                                                    <p className="text-sm font-medium text-white/40">No live feed</p>
+                                                    <p className="text-xs text-white/20 mt-1">Select an account and start an action</p>
+                                                </div>
                                             </div>
                                         )}
                                         <div className="absolute inset-0 ring-1 ring-inset ring-white/10 rounded-2xl pointer-events-none" />
@@ -690,11 +838,21 @@ export default function Dashboard() {
                                         </div>
                                         <div className="aspect-video bg-[#030303] flex items-center justify-center relative overflow-hidden">
                                             {screenshots[acc.username] ? (
-                                                <img src={screenshots[acc.username]} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                                                <div className="w-full h-full">
+                                                    <img 
+                                                        src={screenshots[acc.username]} 
+                                                        alt={`Screenshot of @${acc.username}`}
+                                                        className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-700" 
+                                                        onError={(e) => {
+                                                            const target = e.target as HTMLImageElement;
+                                                            target.style.display = 'none';
+                                                        }}
+                                                    />
+                                                </div>
                                             ) : (
-                                                <div className="flex flex-col items-center gap-3">
-                                                    <WifiOff size={24} className="text-white/10" />
-                                                    <span className="text-xs text-white/20 font-mono">No signal</span>
+                                                <div className="flex flex-col items-center gap-2">
+                                                    <WifiOff size={20} className="text-white/15" />
+                                                    <span className="text-[10px] text-white/25 font-mono">No signal</span>
                                                 </div>
                                             )}
                                             {/* Hover indicator */}
@@ -1063,6 +1221,31 @@ export default function Dashboard() {
                                                     <option value="MAIN">MAIN (Model)</option>
                                                     <option value="SUPPORT">SUPPORT (Spammer)</option>
                                                 </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Groupe <span className="text-red-400">*</span></label>
+                                            <div className="relative">
+                                                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><FolderTree size={16} /></div>
+                                                <select 
+                                                    value={newAcc.groupId} 
+                                                    onChange={(e) => setNewAcc({...newAcc, groupId: e.target.value})}
+                                                    className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
+                                                    required
+                                                >
+                                                    <option value="">Sélectionner un groupe...</option>
+                                                    {availableGroups.map(group => (
+                                                        <option key={group.id} value={group.id}>
+                                                            {group.name} ({group.taskType})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                {availableGroups.length === 0 && (
+                                                    <p className="text-[10px] text-orange-400 mt-1">
+                                                        ⚠️ Vous devez d'abord créer un groupe
+                                                    </p>
+                                                )}
                                             </div>
                                         </div>
 
@@ -1522,8 +1705,34 @@ function SidebarIcon({ icon, active, onClick, title }: { icon: any, active?: boo
     );
 }
 
-function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index, platform }: { account: Account, active: boolean, onClick: () => void, onLaunch: (action: string) => void, onEditProfile: () => void, index: number, platform: string }) {
+function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index, platform, groups, onGroupChange, autoSequenceStatus }: { 
+    account: Account, 
+    active: boolean, 
+    onClick: () => void, 
+    onLaunch: (action: string, autoSequence?: boolean) => void, 
+    onEditProfile: () => void, 
+    index: number, 
+    platform: string,
+    groups?: Group[],
+    onGroupChange?: (accountId: string, groupId: string) => void,
+    autoSequenceStatus?: Record<string, {
+        running: boolean;
+        currentStep: number;
+        totalSteps: number;
+        currentAction: string;
+    }>
+}) {
     const statusTheme = getStatusColor(account.status);
+    
+    // Action labels mapping
+    const actionLabels: Record<string, string> = {
+        warmUp: 'Warm Up',
+        setupProfile: 'Setup Profile',
+        joinCommunity: 'Join Communities',
+        postCommunity: 'Post Captions',
+        spamComments: 'Spam Comments',
+        Complete: 'Complete'
+    };
     
     // Actions mapping depending on platform
     const platformActions = platform === 'TWITTER' ? [
@@ -1538,6 +1747,8 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
     ];
 
     const [showActions, setShowActions] = useState(false);
+    const [showGroupDropdown, setShowGroupDropdown] = useState(false);
+    const currentGroup = groups?.find(g => g.id === (account as any).groupId);
 
     return (
         <motion.div 
@@ -1561,9 +1772,67 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
                         <div className={`w-1.5 h-1.5 rounded-full ${statusTheme.dot}`} />
                         <span className={`text-[10px] uppercase font-mono tracking-wider ${statusTheme.dot.replace('bg-', 'text-')}`}>{account.status || 'IDLE'}</span>
                     </div>
+                    {/* Group Badge */}
+                    {groups && currentGroup && (
+                        <div className="mt-1">
+                            <span className="text-[9px] uppercase tracking-wider text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">
+                                📁 {currentGroup.name}
+                            </span>
+                        </div>
+                    )}
                 </div>
                 
                 <div className="flex gap-2">
+                    {/* Change Group Button */}
+                    {groups && groups.length > 1 && (
+                        <div className="relative">
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); setShowGroupDropdown(!showGroupDropdown); }} 
+                                className="p-2.5 bg-white/5 text-white/60 rounded-xl hover:bg-purple-500/20 hover:text-purple-400 transition-all shadow-sm shrink-0"
+                                title="Change Group"
+                            >
+                                <FolderTree size={16} />
+                            </button>
+                            
+                            <AnimatePresence mode="wait">
+                                {showGroupDropdown && (
+                                    <motion.div 
+                                        key={`group-dropdown-${account.id}`}
+                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                        className="absolute right-0 top-full mt-2 w-56 bg-[#121215] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-50 overflow-hidden"
+                                    >
+                                        <div className="p-2 flex flex-col gap-1">
+                                            <div className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-white/40 font-semibold">Move to Group</div>
+                                            {groups.map(group => (
+                                                <button 
+                                                    key={group.id}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (onGroupChange && group.id !== (account as any).groupId) {
+                                                            onGroupChange(account.id, group.id);
+                                                            setShowGroupDropdown(false);
+                                                        }
+                                                    }}
+                                                    disabled={group.id === (account as any).groupId}
+                                                    className={`px-3 py-2 rounded-lg text-left text-xs transition-all ${
+                                                        group.id === (account as any).groupId
+                                                            ? 'bg-blue-500/20 text-blue-400 cursor-not-allowed'
+                                                            : 'hover:bg-white/5 text-white/80'
+                                                    }`}
+                                                >
+                                                    <div className="font-medium">{group.name}</div>
+                                                    <div className="text-[10px] text-white/40 mt-0.5">{group.taskType}</div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    )}
+                    
                     {/* Edit Profile Button */}
                     <button 
                         onClick={(e) => { e.stopPropagation(); onEditProfile(); }} 
@@ -1581,23 +1850,48 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
                         >
                             <Play size={16} fill="currentColor" />
                         </button>
-                    <AnimatePresence>
+                    <AnimatePresence mode="wait">
                         {showActions && (
                             <motion.div 
-                                key="actions-dropdown"
+                                key={`actions-dropdown-${account.id}`}
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                className="absolute right-0 top-full mt-2 w-56 bg-[#121215] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-50 overflow-hidden"
+                                className="absolute right-0 top-full mt-2 w-64 bg-[#121215] border border-white/10 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.8)] z-50 overflow-hidden"
                             >
                                 <div className="p-2 flex flex-col gap-1">
                                     <div className="px-3 py-1.5 text-[10px] uppercase tracking-widest text-white/40 font-semibold">Select Action</div>
+                                                                
+                                    {/* Auto Sequence Button - Only for Twitter */}
+                                    {platform === 'TWITTER' && (
+                                        <button 
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onLaunch('warmUp', true); // true = auto sequence
+                                                setShowActions(false);
+                                            }}
+                                            className="px-3 py-2.5 text-left text-sm font-semibold bg-gradient-to-r from-violet-600/20 to-purple-600/20 hover:from-violet-600/30 hover:to-purple-600/30 text-violet-300 border border-violet-500/30 rounded-lg transition-all flex items-center gap-2"
+                                        >
+                                            <span className="text-base">⚡</span>
+                                            <div>
+                                                <div>Run Full Sequence</div>
+                                                <div className="text-[10px] text-violet-400/70 font-normal">All steps automatically</div>
+                                            </div>
+                                        </button>
+                                    )}
+                                                                
+                                    {/* Divider */}
+                                    {platform === 'TWITTER' && (
+                                        <div className="border-t border-white/5 my-1"></div>
+                                    )}
+                                                                
+                                    {/* Individual Actions */}
                                     {platformActions.map(action => (
                                         <button 
                                             key={action.id}
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                onLaunch(action.id);
+                                                onLaunch(action.id, false); // false = single action
                                                 setShowActions(false);
                                             }}
                                             className="px-3 py-2 text-left text-sm text-white/80 hover:bg-white/10 hover:text-white rounded-lg transition-colors truncate"
@@ -1626,6 +1920,27 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
                         className={`h-full rounded-full ${statusTheme.dot === 'bg-white/30' ? 'bg-violet-500' : statusTheme.dot}`} 
                     />
                 </div>
+                
+                {/* Auto Sequence Progress Indicator */}
+                {autoSequenceStatus[account.id]?.running && (
+                    <div className="mt-3 p-2 bg-gradient-to-r from-violet-600/10 to-purple-600/10 border border-violet-500/30 rounded-lg">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs">⚡</span>
+                            <span className="text-[10px] uppercase tracking-wider text-violet-300 font-semibold">Auto Sequence</span>
+                        </div>
+                        <div className="text-[11px] text-white/80 mb-2">
+                            Step {autoSequenceStatus[account.id].currentStep + 1}/{autoSequenceStatus[account.id].totalSteps + 1}: 
+                            <span className="text-violet-300 ml-1">{actionLabels[autoSequenceStatus[account.id].currentAction] || autoSequenceStatus[account.id].currentAction}</span>
+                        </div>
+                        <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                            <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${((autoSequenceStatus[account.id].currentStep + 1) / (autoSequenceStatus[account.id].totalSteps + 1)) * 100}%` }}
+                                className="h-full bg-gradient-to-r from-violet-500 to-purple-500 rounded-full"
+                            />
+                        </div>
+                    </div>
+                )}
             </div>
         </motion.div>
     );

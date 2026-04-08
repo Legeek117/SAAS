@@ -683,11 +683,22 @@ async function doWarmUp(page: Page, emitLog: (msg: string) => void) {
 
 async function doAutoLike(page: Page, emitLog: (msg: string) => void, config: any) {
     const count = config?.count || randomRange(5, 12);
-    emitLog(`❤️ Auto-Like : Ciblage de ${count} posts (contenu adulte/NSFW uniquement)...`);
+    emitLog(`❤️ Auto-Like : Targeting ${count} OnlyFans posts...`);
 
-    // Go to explore adult content - use specific search terms
-    const adultKeywords = ['onlyfans', 'nsfw', 'adult content', '18+', 'model', 'babe'];
-    const keyword = adultKeywords[randomRange(0, adultKeywords.length - 1)];
+    // ONLY search for OnlyFans content
+    const onlyfansKeywords = [
+        'onlyfans',
+        'onlyfans creator',
+        'onlyfans model',
+        'onlyfans content',
+        'onlyfans girl',
+        'onlyfans babe',
+        'onlyfans post',
+        'link in bio onlyfans',
+        'check my onlyfans',
+        'onlyfans link'
+    ];
+    const keyword = onlyfansKeywords[randomRange(0, onlyfansKeywords.length - 1)];
     
     emitLog(`🔍 Recherche: "${keyword}" (contenu adulte)`);
     await page.goto(`https://x.com/search?q=${encodeURIComponent(keyword)}&f=user`, { waitUntil: 'domcontentloaded' });
@@ -713,21 +724,30 @@ async function doAutoLike(page: Page, emitLog: (msg: string) => void, config: an
             await sleep(randomRange(2000, 5000));
             await humanClick(page, btn);
             liked++;
-            emitLog(`❤️ Liked adult content post #${liked}/${count}`);
+            emitLog(`❤️ Liked OnlyFans post #${liked}/${count}`);
             await sleep(randomRange(1500, 4000));
         }
         scrollAttempts++;
     }
 
-    emitLog(`✅ Auto-Like terminé : ${liked} posts de contenu adulte likés.`);
+    emitLog(`✅ Auto-Like completed: ${liked} OnlyFans posts liked.`);
 }
 
 // ─── Auto Follow ──────────────────────────────────────────────────────────────
 
 async function doAutoFollow(page: Page, emitLog: (msg: string) => void, config: any) {
-    const keyword = config?.keyword || 'onlyfans model content creator';
+    // ONLY target OnlyFans creators
+    const onlyfansKeywords = [
+        'onlyfans creator',
+        'onlyfans model',
+        'onlyfans girl',
+        'onlyfans babe',
+        'onlyfans content creator',
+        'onlyfans influencer'
+    ];
+    const keyword = config?.keyword || onlyfansKeywords[randomRange(0, onlyfansKeywords.length - 1)];
     const count = config?.count || randomRange(3, 7);
-    emitLog(`👥 Auto-Follow : Recherche de "${keyword}" pour suivre ${count} comptes (OnlyFans/Models)...`);
+    emitLog(`👥 Auto-Follow : Following ${count} OnlyFans creators...`);
 
     // Go to search
     await page.goto(`https://x.com/search?q=${encodeURIComponent(keyword)}&f=user`, { waitUntil: 'domcontentloaded' });
@@ -748,13 +768,13 @@ async function doAutoFollow(page: Page, emitLog: (msg: string) => void, config: 
             await sleep(randomRange(3000, 7000));
             await humanClick(page, btn);
             followed++;
-            emitLog(`👤 Followed account #${followed}/${count} (OnlyFans niche)`);
+            emitLog(`👤 Followed OnlyFans creator #${followed}/${count}`);
             await sleep(randomRange(2000, 5000));
         }
         scrollAttempts++;
     }
 
-    emitLog(`✅ Auto-Follow terminé : ${followed} comptes suivis (models/OF creators).`);
+    emitLog(`✅ Auto-Follow completed: ${followed} OnlyFans creators followed.`);
 }
 
 // ─── Auto Retweet ─────────────────────────────────────────────────────────────
@@ -838,11 +858,22 @@ const AUTO_COMMENTS = [
 async function doAutoComment(page: Page, emitLog: (msg: string) => void, config: any) {
     const count = config?.count || randomRange(2, 4);
     const customComments = config?.comments || AUTO_COMMENTS;
-    emitLog(`💬 Leaving ${count} natural comments on timeline...`);
+    emitLog(`💬 Leaving ${count} natural comments on OnlyFans content...`);
 
-    // Search for adult content creators
-    const adultKeywords = ['onlyfans', 'nsfw', 'adult', 'model', '18+'];
-    const keyword = adultKeywords[randomRange(0, adultKeywords.length - 1)];
+    // Search ONLY for OnlyFans content creators
+    const onlyfansKeywords = [
+        'onlyfans',
+        'onlyfans creator',
+        'onlyfans model',
+        'onlyfans girl',
+        'onlyfans babe',
+        'onlyfans content',
+        'onlyfans post',
+        'link in bio onlyfans',
+        'subscribe my onlyfans',
+        'onlyfans link'
+    ];
+    const keyword = onlyfansKeywords[randomRange(0, onlyfansKeywords.length - 1)];
     
     emitLog(`🔍 Recherche de contenu: "${keyword}"`);
     await page.goto(`https://x.com/search?q=${encodeURIComponent(keyword)}`, { waitUntil: 'domcontentloaded' });
@@ -889,26 +920,26 @@ async function doAutoComment(page: Page, emitLog: (msg: string) => void, config:
 // ─── Auto Post ────────────────────────────────────────────────────────────────
 
 const AUTO_TWEETS = [
-    "Just subscribed to the hottest OF creators 🔥😈 Who should I check next?",
-    "Late night jerking session with some premium content 💦😍",
-    "OnlyFans has the best pussy on the internet 🍑💦 Facts.",
-    "Looking for new sluts to follow. Drop your OF links! 😈🔥",
-    "My dick is tired but my eyes aren't 😍💦 #OnlyFans",
-    "Just found the perfect creampie material 🍑💦😈",
-    "Who else is addicted to NSFW Twitter? 🙋‍♂️🔥",
-    "These OF girls know exactly what we want 😍🍆💦",
-    "Jerking off to premium content > free porn any day 💦😈",
-    "Need more thick girls with big asses in my feed 🍑🔥",
-    "Just blew my load to an amazing OF creator 💦😍 Worth every penny",
-    "The titties on Twitter are unmatched today 🍒🔥😍",
-    "POV: You found the perfect OnlyFans babe 😈💋",
-    "My OnlyFans bill is huge but I don't care 😍💦🔥",
-    "Looking for girls who actually show everything 😈🍑 No teasers!",
-    "Just tipped $100 for exclusive content 💦😍 So fucking worth it",
-    "Thick thighs and big tits save lives 🍒🍑🔥",
-    "Who wants to be my personal cam girl? 😈💦",
-    "Twitter NSFW > Instagram any day 🔥😍 No censorship!",
-    "Just discovered the horniest corner of Twitter 😍🍆💦",
+    "Creating exclusive content for my amazing followers 🔥✨ Link in bio",
+    "New photoshoot just dropped! Check it out 😍📸",
+    "Behind the scenes content you don't want to miss 👀💕",
+    "Thank you for all the support! More coming soon ❤️🔥",
+    "Special content available now! Don't miss out 💋✨",
+    "Daily updates and exclusive posts 📱💕 Subscribe now",
+    "Just uploaded something special for you 😍🔥",
+    "Premium content creator | Daily posts | Link below 👇",
+    "Your daily dose of exclusive content 💕✨",
+    "New set just dropped! Check the link 😍📸",
+    "Creating content that makes you smile ❤️🔥",
+    "Exclusive access to my world 🌟 Subscribe now",
+    "Behind the scenes of my latest shoot 📸💕",
+    "Thank you for being amazing supporters! 💋✨",
+    "More content coming your way today! 🔥😍",
+    "Special announcement coming soon! Stay tuned 📱✨",
+    "Living my dream and sharing it with you 💕🌟",
+    "New exclusive content just for subscribers 🔥💋",
+    "Appreciate all the love and support! ❤️✨",
+    "Check out my latest post! You'll love it 😍📸",
 ];
 
 async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: any) {
@@ -1090,11 +1121,16 @@ async function doScheduledPost(page: Page, emitLog: (msg: string) => void, postI
 // ─── Setup Profile ────────────────────────────────────────────────────────────
 
 const AUTO_BIOS = [
-    "Exploring the Web3 frontier 🚀 | Tech enthusiast | Building the future.",
-    "Crypto, Tech, and AI. Always learning. 💡",
-    "Digital citizen. Decentralizing the world one block at a time.",
-    "NFTs, DeFi, and the Metaverse. GM! ☀️",
-    "On a journey through the blockchain. Passionate about innovation.",
+    "OnlyFans Creator 🔥 | Exclusive content | Link below 👇",
+    "Content Creator 💕 | Daily posts | Subscribe for more ✨",
+    "Your favorite creator 😍 | New content every day | Link in bio",
+    "Premium content 🔞 | Exclusive access | DM for collabs 💌",
+    "Lifestyle & Content Creator 🌟 | Check my links below",
+    "Digital Creator 📸 | Exclusive content on my page 💋",
+    "Creating content you'll love ❤️ | Subscribe now 👇",
+    "Exclusive content creator 🔥 | Daily updates | Link below",
+    "Your daily dose of premium content 😍 | Subscribe ✨",
+    "Content Creator 💕 | Exclusive access | Don't miss out 🔥",
 ];
 
 async function doSetupProfile(page: Page, emitLog: (msg: string) => void, config?: any) {
@@ -1128,8 +1164,21 @@ async function doSetupProfile(page: Page, emitLog: (msg: string) => void, config
 // ─── Join Community ───────────────────────────────────────────────────────────
 
 async function doJoinCommunity(page: Page, emitLog: (msg: string) => void, config?: any) {
-    const keyword = config?.keyword || 'Web3 Crypto';
-    emitLog(`👥 Join Community : Recherche de "${keyword}"...`);
+    // ONLY search for OnlyFans communities
+    const onlyfansKeywords = [
+        'onlyfans',
+        'onlyfans creator',
+        'onlyfans model',
+        'onlyfans content',
+        'onlyfans girl',
+        'link in bio onlyfans',
+        'subscribe my onlyfans',
+        'onlyfans link',
+        'onlyfans creator community',
+        'onlyfans models'
+    ];
+    const keyword = config?.keyword || onlyfansKeywords[randomRange(0, onlyfansKeywords.length - 1)];
+    emitLog(`👥 Join Community : Searching OnlyFans communities for "${keyword}"...`);
 
     await page.goto('https://x.com/explore', { waitUntil: 'domcontentloaded' });
     await sleep(randomRange(3000, 5000));
@@ -1240,6 +1289,19 @@ export const twitterWorkerHandler = async (job: any) => {
                 await context.clearCookies();
             } else {
                 emitLog("✅ Connexion réussie avec les cookies!");
+                
+                // Save refreshed cookies to database
+                try {
+                    const refreshedCookies = await context.cookies();
+                    emitLog(`💾 Sauvegarde des cookies rafraîchis (${refreshedCookies.length} cookies)...`);
+                    await prisma.twitterAccount.update({
+                        where: { id: accountId },
+                        data: { sessionCookies: refreshedCookies as any }
+                    });
+                    emitLog("✅ Cookies mis à jour en base de données");
+                } catch (error) {
+                    emitLog(`⚠️ Erreur sauvegarde cookies: ${error}`);
+                }
             }
         } else if (existingSession && sessionManager.isSessionValid(existingSession) && existingSession.cookies.length > 0) {
             emitLog("🍪 Chargement des cookies de session locale...");
@@ -1250,6 +1312,23 @@ export const twitterWorkerHandler = async (job: any) => {
                 emitLog("🗑️ Cookies invalides, suppression de l'ancienne session...");
                 await sessionManager.deleteSession(username);
                 await context.clearCookies();
+            } else {
+                emitLog("✅ Session locale valide!");
+                
+                // Save refreshed cookies to database
+                try {
+                    const refreshedCookies = await context.cookies();
+                    emitLog(`💾 Rafraîchissement des cookies (${refreshedCookies.length} cookies)...`);
+                    
+                    // Update database
+                    await prisma.twitterAccount.update({
+                        where: { id: accountId },
+                        data: { sessionCookies: refreshedCookies as any }
+                    });
+                    emitLog("✅ Cookies mis à jour en base de données");
+                } catch (error) {
+                    emitLog(`⚠️ Erreur sauvegarde cookies: ${error}`);
+                }
             }
         }
 

@@ -181,7 +181,7 @@ app.get('/api/twitter-accounts', async (req, res) => {
  * Add a new Twitter account + proxy WITH authToken support
  */
 app.post('/api/twitter-accounts', async (req, res) => {
-    const { username, cookies, ct0, type, proxy } = req.body;
+    const { username, cookies, ct0, type, proxy, groupId } = req.body;
 
     // Validate required fields
     if (!username) {
@@ -199,6 +199,26 @@ app.post('/api/twitter-accounts', async (req, res) => {
 
     if (!hasAuthToken) {
         return res.status(400).json({ error: 'auth_token cookie is required' });
+    }
+
+    // Validate groupId - now required
+    if (!groupId) {
+        return res.status(400).json({ 
+            error: 'groupId is required. Every account must belong to a group.' 
+        });
+    }
+
+    // Verify group exists
+    try {
+        const group = await prisma.accountGroup.findUnique({
+            where: { id: groupId }
+        });
+        
+        if (!group) {
+            return res.status(400).json({ error: 'Group not found' });
+        }
+    } catch (error) {
+        return res.status(400).json({ error: 'Invalid group ID' });
     }
 
     // Extract ct0 from cookies if not provided separately
@@ -222,6 +242,7 @@ app.post('/api/twitter-accounts', async (req, res) => {
                 type: type || 'MAIN',
                 status: 'ACTIVE', // Active since we have valid cookies
                 sessionCookies: cookies,
+                groupId, // Required - account must belong to a group
                 // TODO: Add ct0 field after Prisma client regeneration
                 userId: 'temp-user-id',
                 proxy: proxy ? {
@@ -232,6 +253,9 @@ app.post('/api/twitter-accounts', async (req, res) => {
                         password: proxy.password
                     }
                 } : undefined
+            },
+            include: {
+                group: true
             }
         });
         res.status(201).json(newAccount);
@@ -468,6 +492,46 @@ app.patch('/api/groups/:id', async (req, res) => {
             include: { accounts: true }
         });
         res.json(group);
+    } catch (error: any) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+/**
+ * Update account group assignment
+ */
+app.patch('/api/twitter-accounts/:id/group', async (req, res) => {
+    const { id } = req.params;
+    const { groupId } = req.body;
+
+    if (!groupId) {
+        return res.status(400).json({ error: 'groupId is required' });
+    }
+
+    try {
+        // Verify group exists
+        const group = await prisma.accountGroup.findUnique({
+            where: { id: groupId }
+        });
+
+        if (!group) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        // Update account's group
+        const account = await prisma.twitterAccount.update({
+            where: { id },
+            data: { groupId },
+            include: {
+                group: true
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Account group updated successfully',
+            account
+        });
     } catch (error: any) {
         res.status(400).json({ error: error.message });
     }

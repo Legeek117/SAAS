@@ -82,13 +82,13 @@ model TwitterAccount {
   updatedAt      DateTime       @updatedAt
   bannerImage    String?
   bio            String?
-  groupId        String?
+  groupId        String
   niche          String?
   profileImage   String?
   ct0            String?
   activityLogs   ActivityLog[]
   banAlerts      BanAlert[]
-  group          AccountGroup?  @relation(fields: [groupId], references: [id])
+  group          AccountGroup   @relation(fields: [groupId], references: [id])
   user           User           @relation(fields: [userId], references: [id])
   posts          TwitterPost[]
   proxy          TwitterProxy?
