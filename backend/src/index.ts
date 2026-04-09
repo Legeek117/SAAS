@@ -9,6 +9,11 @@ import IORedis from 'ioredis';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { authenticateToken, isAdmin, AuthRequest } from './middleware/auth';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'ghost-content-secret-key-2024';
 
 dotenv.config();
 
@@ -90,6 +95,135 @@ function getActivityField(action: string): string | null {
     return actionMap[action] || null;
 }
 
+// --- AUTH ENDPOINTS ---
+
+/**
+ * Register a new user
+ */
+app.post('/api/auth/register', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = await prisma.user.create({
+            data: { 
+                email, 
+                password: hashedPassword,
+                isActive: false 
+            }
+        });
+        res.status(201).json({ message: 'Utilisateur créé avec succès' });
+    } catch (error: any) {
+        res.status(400).json({ error: 'Email déjà utilisé ou données invalides' });
+    }
+});
+
+/**
+ * Login
+ */
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) return res.status(401).json({ error: 'Identifiants invalides' });
+
+        const validPassword = await bcrypt.compare(password, user.password);
+        if (!validPassword) return res.status(401).json({ error: 'Identifiants invalides' });
+
+        const now = new Date();
+        const isExpired = user.subscriptionExpiresAt && new Date(user.subscriptionExpiresAt) < now;
+
+        if (!user.isActive || isExpired) {
+            return res.status(403).json({ 
+                error: isExpired 
+                    ? 'Votre abonnement a expiré, contactez l\'administrateur pour le renouveler.'
+                    : 'Votre compte est en attente d\'activation par l\'administrateur. Veuillez procéder au paiement pour activer votre accès.' 
+            });
+        }
+
+        const token = jwt.sign(
+            { id: user.id, email: user.email, role: user.role },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({ 
+            token, 
+            user: { 
+                id: user.id, 
+                email: user.email, 
+                role: user.role,
+                subscriptionExpiresAt: user.subscriptionExpiresAt 
+            } 
+        });
+    } catch (error) {
+        res.status(500).json({ error: 'Erreur lors de la connexion' });
+    }
+});
+
+// --- ADMIN ENDPOINTS ---
+
+/**
+ * Get all users (Admin)
+ */
+app.get('/api/admin/users', authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const users = await prisma.user.findMany({
+            select: {
+                id: true,
+                email: true,
+                role: true,
+                isActive: true,
+                subscriptionExpiresAt: true,
+                subscription: true,
+                createdAt: true
+            }
+        });
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ error: 'Erreur lors de la récupération des utilisateurs' });
+    }
+});
+
+/**
+ * Update user status (Admin)
+ */
+app.patch('/api/admin/users/:id/status', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { isActive, expiresAt } = req.body;
+    try {
+        await prisma.user.update({
+            where: { id },
+            data: { 
+                isActive,
+                ...(isActive && expiresAt && { subscriptionExpiresAt: new Date(expiresAt) })
+            }
+        });
+        res.json({ success: true, message: `Utilisateur ${isActive ? 'activé' : 'désactivé'}` });
+    } catch (error) {
+        res.status(400).json({ error: 'Impossible de mettre à jour l\'utilisateur' });
+    }
+});
+
+/**
+ * Update user subscription (Admin)
+ */
+app.patch('/api/admin/users/:id/subscription', authenticateToken, isAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { expiresAt, subscription } = req.body;
+    try {
+        await prisma.user.update({
+            where: { id },
+            data: { 
+                ...(expiresAt && { subscriptionExpiresAt: new Date(expiresAt) }),
+                ...(subscription && { subscription })
+            }
+        });
+        res.json({ success: true, message: 'Abonnement mis à jour' });
+    } catch (error) {
+        res.status(400).json({ error: 'Impossible de mettre à jour l\'abonnement' });
+    }
+});
+
 // --- API ENDPOINTS ---
 
 /**
@@ -102,7 +236,7 @@ app.get('/health', (req, res) => {
 /**
  * Get all accounts
  */
-app.get('/api/accounts', async (req, res) => {
+app.get('/api/accounts', authenticateToken, async (req: AuthRequest, res) => {
     const accounts = await prisma.iGAccount.findMany({
         include: { proxy: true }
     });
@@ -112,7 +246,7 @@ app.get('/api/accounts', async (req, res) => {
 /**
  * Add a new account + proxy
  */
-app.post('/api/accounts', async (req, res) => {
+app.post('/api/accounts', authenticateToken, async (req: AuthRequest, res) => {
     const { username, password, proxy } = req.body;
 
     try {
@@ -147,7 +281,7 @@ app.post('/api/accounts', async (req, res) => {
 /**
  * Delete an account
  */
-app.delete('/api/accounts/:id', async (req, res) => {
+app.delete('/api/accounts/:id', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
     try {
         // First delete the proxy if it exists
@@ -167,7 +301,7 @@ app.delete('/api/accounts/:id', async (req, res) => {
 /**
  * Trigger an automation action
  */
-app.post('/api/accounts/:id/action', async (req, res) => {
+app.post('/api/accounts/:id/action', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
     const { action } = req.body; // e.g., 'warmUp', 'follow'
 
@@ -188,7 +322,7 @@ app.post('/api/accounts/:id/action', async (req, res) => {
 /**
  * Get all Twitter accounts
  */
-app.get('/api/twitter-accounts', async (req, res) => {
+app.get('/api/twitter-accounts', authenticateToken, async (req: AuthRequest, res) => {
     const accounts = await prisma.twitterAccount.findMany({
         include: { proxy: true }
     });
@@ -198,7 +332,7 @@ app.get('/api/twitter-accounts', async (req, res) => {
 /**
  * Add a new Twitter account + proxy WITH authToken support
  */
-app.post('/api/twitter-accounts', async (req, res) => {
+app.post('/api/twitter-accounts', authenticateToken, async (req: AuthRequest, res) => {
     const { username, cookies, ct0, type, proxy, groupId } = req.body;
 
     // Validate required fields
@@ -285,7 +419,7 @@ app.post('/api/twitter-accounts', async (req, res) => {
 /**
  * Delete a Twitter account
  */
-app.delete('/api/twitter-accounts/:id', async (req, res) => {
+app.delete('/api/twitter-accounts/:id', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
     try {
         // First delete the proxy if it exists
@@ -305,7 +439,7 @@ app.delete('/api/twitter-accounts/:id', async (req, res) => {
 /**
  * Trigger an automation action for Twitter
  */
-app.post('/api/twitter-accounts/:id/action', async (req, res) => {
+app.post('/api/twitter-accounts/:id/action', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
     const { action } = req.body; // e.g., 'setupProfile', 'joinCommunities', 'post', 'comment'
 
@@ -326,7 +460,7 @@ app.post('/api/twitter-accounts/:id/action', async (req, res) => {
 /**
  * Create a scheduled tweet
  */
-app.post('/api/twitter-posts', async (req, res) => {
+app.post('/api/twitter-posts', authenticateToken, async (req: AuthRequest, res) => {
     const { accountId, content, mediaUrls, scheduleDate, isComment, parentPostUrl } = req.body;
 
     try {

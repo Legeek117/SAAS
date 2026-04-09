@@ -129,9 +129,11 @@ interface NewFeaturesProps {
         niche: string;
     };
     onProfileFormChange?: (form: any) => void;
+    token: string | null;
+    onClose: () => void;
 }
 
-export default function NewFeatures({ accounts, selectedAccount: externalSelectedAccount, profileForm: externalProfileForm, onProfileFormChange }: NewFeaturesProps) {
+export default function NewFeatures({ accounts, selectedAccount: externalSelectedAccount, profileForm: externalProfileForm, onProfileFormChange, token, onClose }: NewFeaturesProps) {
     const [activeTab, setActiveTab] = useState<'groups' | 'templates' | 'activities' | 'comments' | 'notifications' | 'stats'>('groups');
     
     // Data states
@@ -186,7 +188,9 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
         setStatsLoading(true);
         try {
             // Fetch activities
-            const activitiesRes = await fetch('http://localhost:4000/api/activities?limit=1000');
+            const activitiesRes = await fetch('http://localhost:4000/api/activities?limit=1000', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const activities = await activitiesRes.json();
 
             // Process data for charts
@@ -306,7 +310,9 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
 
     // Real-time notifications
     useEffect(() => {
-        const socket = io('http://localhost:4000');
+        const socket = io('http://localhost:4000', {
+            auth: { token }
+        });
         
         socket.on('notification', (notification) => {
             console.log('🔔 Notification reçue:', notification);
@@ -354,27 +360,37 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
         try {
             switch(activeTab) {
                 case 'groups':
-                    const groupsRes = await fetch('http://localhost:4000/api/groups');
+                    const groupsRes = await fetch('http://localhost:4000/api/groups', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
                     const groupsData = await groupsRes.json();
                     setGroups(groupsData);
                     break;
                 case 'templates':
-                    const templatesRes = await fetch('http://localhost:4000/api/templates');
+                    const templatesRes = await fetch('http://localhost:4000/api/templates', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
                     const templatesData = await templatesRes.json();
                     setTemplates(templatesData);
                     break;
                 case 'activities':
-                    const activitiesRes = await fetch('http://localhost:4000/api/activities?limit=100');
+                    const activitiesRes = await fetch('http://localhost:4000/api/activities?limit=100', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
                     const activitiesData = await activitiesRes.json();
                     setActivities(activitiesData);
                     break;
                 case 'comments':
-                    const commentsRes = await fetch('http://localhost:4000/api/comment-requests');
+                    const commentsRes = await fetch('http://localhost:4000/api/comment-requests', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
                     const commentsData = await commentsRes.json();
                     setCommentRequests(commentsData);
                     break;
                 case 'notifications':
-                    const notifRes = await fetch('http://localhost:4000/api/notifications');
+                    const notifRes = await fetch('http://localhost:4000/api/notifications', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
                     const notifData = await notifRes.json();
                     setNotifications(notifData);
                     setUnreadCount(notifData.filter((n: Notification) => !n.read).length);
@@ -392,8 +408,11 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
     const createGroup = async () => {
         const res = await fetch('http://localhost:4000/api/groups', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...newGroup, userId: 'temp-user-id' })
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ ...newGroup })
         });
         if (res.ok) {
             setShowGroupModal(false);
@@ -403,7 +422,10 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
     };
 
     const deleteGroup = async (id: string) => {
-        await fetch(`http://localhost:4000/api/groups/${id}`, { method: 'DELETE' });
+        await fetch(`http://localhost:4000/api/groups/${id}`, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         fetchData();
     };
 
@@ -448,7 +470,10 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
     const createTemplate = async () => {
         const res = await fetch('http://localhost:4000/api/templates', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({
                 ...newTemplate,
                 hashtags: newTemplate.hashtags.split(',').map(h => h.trim())
@@ -462,7 +487,10 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
     };
 
     const deleteTemplate = async (id: string) => {
-        await fetch(`http://localhost:4000/api/templates/${id}`, { method: 'DELETE' });
+        await fetch(`http://localhost:4000/api/templates/${id}`, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         fetchData();
     };
 
@@ -470,7 +498,10 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
     const createCommentRequest = async () => {
         const res = await fetch('http://localhost:4000/api/comment-requests', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({
                 ...newCommentRequest,
                 postId: 'auto',
@@ -506,7 +537,10 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
             // Update profile
             await fetch(`http://localhost:4000/api/twitter-accounts/${selectedAccount.id}/profile`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     ...profileForm,
                     profileImage: profileImageUrl,
@@ -531,7 +565,8 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
     // Mark notification as read
     const markAsRead = async (id: string) => {
         await fetch(`http://localhost:4000/api/notifications/${id}/read`, {
-            method: 'PATCH'
+            method: 'PATCH',
+            headers: { 'Authorization': `Bearer ${token}` }
         });
         fetchData();
     };
@@ -587,6 +622,7 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
 
         const response = await fetch('http://localhost:4000/api/upload', {
             method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
             body: formData,
         });
 
@@ -608,7 +644,7 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
     ];
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
+        <div className="fixed inset-0 z-[60] overflow-y-auto bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white">
             <div className="max-w-7xl mx-auto p-6">
                 {/* Header */}
                 <div className="mb-8">
@@ -617,6 +653,14 @@ export default function NewFeatures({ accounts, selectedAccount: externalSelecte
                     </h1>
                     <p className="text-slate-400">Gérez vos groupes, templates et automatisations</p>
                 </div>
+
+                <button 
+                    onClick={onClose}
+                    className="fixed top-6 right-6 p-3 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 hover:text-white transition-all z-[70] shadow-xl"
+                    title="Fermer"
+                >
+                    <X className="w-6 h-6" />
+                </button>
 
                 {/* Tab Navigation */}
                 <div className="flex gap-2 mb-6 overflow-x-auto pb-2">

@@ -257,6 +257,7 @@ interface BrowserSession {
 
 async function createStealthSession(
     proxyConfig: any,
+    emitLog: (msg: string) => void,
     existingDeviceInfo?: any,
     existingFingerprint?: any
 ): Promise<BrowserSession> {
@@ -270,13 +271,12 @@ async function createStealthSession(
     const isIOS = ua.includes('iPhone') || ua.includes('iPad');
 
     // Generate a unique fingerprint
+    // Generate a unique fingerprint
     const fpResult = fpGen.getFingerprint({
         devices: ['mobile'],
         operatingSystems: [isIOS ? 'ios' : 'android'],
         browsers: [isIOS ? 'safari' : 'chrome'],
     });
-    
-    console.log('Fingerprint result:', JSON.stringify(fpResult, null, 2).substring(0, 200));
     
     // Use existing fingerprint if provided, otherwise use newly generated one
     const fingerprint = existingFingerprint || fpResult.fingerprint;
@@ -289,18 +289,20 @@ async function createStealthSession(
     };
 
     // Launch browser with stealth args
+    emitLog("🚀 Initialisation de la session furtive...");
     const browser = await chromium.launch({
-        headless: true, // Doit être true puisque tu utilises Docker sans serveur X11 (et tu utilises les cookies maintenant !)
+        headless: true,
         proxy: proxyConfig,
+        executablePath: '/usr/bin/google-chrome', // Force use of system chrome
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
             '--disable-notifications',
             '--disable-blink-features=AutomationControlled',
             '--disable-infobars',
             '--ignore-certificate-errors',
             '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
             '--font-render-hinting=none',
             '--no-first-run',
             '--no-service-autorun',
@@ -311,6 +313,7 @@ async function createStealthSession(
         ignoreDefaultArgs: ['--enable-automation'],
         timeout: 60000,
     });
+    emitLog("✅ Navigateur démarré. Configuration du contexte...");
 
     const context = await browser.newContext({
         userAgent: deviceInfo.userAgent,
@@ -1329,7 +1332,7 @@ export const twitterWorkerHandler = async (job: any) => {
     const existingFingerprint = existingSession?.fingerprint;
 
     emitLog("🔍 Création du profil de périphérique mobile indétectable...");
-    const session = await createStealthSession(proxyConfig, existingDeviceInfo, existingFingerprint);
+    const session = await createStealthSession(proxyConfig, emitLog, existingDeviceInfo, existingFingerprint);
     const { browser, context, page, deviceInfo, fingerprint } = session;
     emitLog("✅ Session furtive créée.");
 

@@ -8,18 +8,26 @@ datasource db {
 }
 
 model User {
-  id              String            @id @default(uuid())
-  email           String            @unique
-  password        String
-  subscription    String            @default("FREE")
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  groups          AccountGroup[]
-  commentRequests CommentRequest[]
-  templates       ContentTemplate[]
-  accounts        IGAccount[]
-  notifications   Notification[]
-  twitterAccounts TwitterAccount[]
+  id                    String            @id @default(uuid())
+  email                 String            @unique
+  password              String
+  role                  UserRole          @default(USER)
+  isActive              Boolean           @default(false)
+  subscriptionExpiresAt DateTime?
+  subscription          String            @default("FREE")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  groups                AccountGroup[]
+  commentRequests       CommentRequest[]
+  templates             ContentTemplate[]
+  accounts              IGAccount[]
+  notifications         Notification[]
+  twitterAccounts       TwitterAccount[]
+}
+
+enum UserRole {
+  ADMIN
+  USER
 }
 
 model IGAccount {

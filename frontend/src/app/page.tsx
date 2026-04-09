@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
 import {
     LayoutDashboard,
@@ -40,7 +41,11 @@ import {
     Target,
     Share2,
     Settings,
-    Edit
+    Edit,
+    Ghost,
+    LogOut,
+    Crown,
+    Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import NewFeatures from '../components/NewFeatures';
@@ -138,6 +143,7 @@ export default function Dashboard() {
     const [showAddModal, setShowAddModal] = useState(false);
     const [showTokenGuide, setShowTokenGuide] = useState(false);
     const [showNewFeatures, setShowNewFeatures] = useState(false);
+    const router = useRouter();
 
     // Posts & Stats State
     const [posts, setPosts] = useState<any[]>([]);
@@ -152,6 +158,8 @@ export default function Dashboard() {
         totalSteps: number;
         currentAction: string;
     }>>({});
+    const [isBlocked, setIsBlocked] = useState(false);
+    const [blockedMessage, setBlockedMessage] = useState('');
 
     // New Account Form State
     const [newAcc, setNewAcc] = useState({ 
@@ -181,6 +189,20 @@ export default function Dashboard() {
     const [newCommentRequest, setNewCommentRequest] = useState({ postUrl: '', totalComments: 0 });
     const [profileForm, setProfileForm] = useState({ profileImage: '', bio: '', bannerImage: '', niche: '' });
     const [unreadNotifications, setUnreadNotifications] = useState(0);
+    const [user, setUser] = useState<any>(null);
+    const [token, setToken] = useState<string | null>(null);
+
+    useEffect(() => {
+        const storedToken = localStorage.getItem('ghost_token');
+        const storedUser = localStorage.getItem('ghost_user');
+        
+        if (!storedToken || !storedUser) {
+            router.push('/login');
+        } else {
+            setToken(storedToken);
+            setUser(JSON.parse(storedUser));
+        }
+    }, []);
 
     useEffect(() => {
         // Save platform preference
@@ -225,8 +247,11 @@ export default function Dashboard() {
 
     // Posts & Stats Functions
     const fetchPosts = async (accountId: string) => {
+        if (!token) return;
         try {
-            const res = await fetch(`http://localhost:4000/api/twitter-posts/${accountId}`);
+            const res = await fetch(`http://localhost:4000/api/twitter-posts/${accountId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await res.json();
             setPosts(data);
         } catch (err) {
@@ -235,8 +260,11 @@ export default function Dashboard() {
     };
 
     const fetchGroups = async () => {
+        if (!token) return;
         try {
-            const res = await fetch('http://localhost:4000/api/groups');
+            const res = await fetch('http://localhost:4000/api/groups', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await res.json();
             setAvailableGroups(data);
             
@@ -250,6 +278,7 @@ export default function Dashboard() {
     };
 
     const fetchStats = async (accountId: string, days: number = 30) => {
+        if (!token) return;
         try {
             // accountId might be username, so find the actual account ID
             let actualAccountId = accountId;
@@ -264,7 +293,9 @@ export default function Dashboard() {
                 }
             }
             
-            const res = await fetch(`http://localhost:4000/api/twitter-stats/${actualAccountId}?days=${days}`);
+            const res = await fetch(`http://localhost:4000/api/twitter-stats/${actualAccountId}?days=${days}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             const data = await res.json();
             setStats(data);
         } catch (err) {
@@ -274,7 +305,7 @@ export default function Dashboard() {
 
     const handleCreatePost = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!activeAccount || !newPost.content) return;
+        if (!activeAccount || !newPost.content || !token) return;
 
         const account = accounts.find(a => a.id === activeAccount);
         if (!account) return;
@@ -286,7 +317,10 @@ export default function Dashboard() {
         try {
             const res = await fetch('http://localhost:4000/api/twitter-posts', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     accountId: account.id,
                     content: newPost.content,
@@ -306,10 +340,14 @@ export default function Dashboard() {
     };
 
     const handleGroupChange = async (accountId: string, groupId: string) => {
+        if (!token) return;
         try {
             const res = await fetch(`http://localhost:4000/api/twitter-accounts/${accountId}/group`, {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({ groupId })
             });
 
@@ -332,12 +370,29 @@ export default function Dashboard() {
     };
 
     const fetchAccounts = async (p: string) => {
+        const storedToken = localStorage.getItem('ghost_token');
+        if (!storedToken) return;
+        
         try {
             const url = p === 'TWITTER' ? 'http://localhost:4000/api/twitter-accounts' : 'http://localhost:4000/api/accounts';
-            const res = await fetch(url);
+            const res = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${storedToken}` }
+            });
+
+            if (res.status === 403) {
+                const data = await res.json();
+                if (data.isInactive) {
+                    setIsBlocked(true);
+                    setBlockedMessage(data.error);
+                    return;
+                }
+            }
+
             if (!res.ok) {
                 throw new Error(`HTTP ${res.status}: ${res.statusText}`);
             }
+            
+            setIsBlocked(false);
             const data = await res.json();
             setAccounts(data);
             if (data.length > 0) {
@@ -398,7 +453,10 @@ export default function Dashboard() {
 
             const response = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
                 body: JSON.stringify({
                     username: newAcc.username,
                     password: newAcc.password,
@@ -437,7 +495,10 @@ export default function Dashboard() {
         const url = platform === 'TWITTER' ? `http://localhost:4000/api/twitter-accounts/${id}/action` : `http://localhost:4000/api/accounts/${id}/action`;
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
             body: JSON.stringify({ action })
         });
         if (!response.ok) {
@@ -494,7 +555,10 @@ export default function Dashboard() {
                     
                     const seqResponse = await fetch(url, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
                         body: JSON.stringify({ action: currentAction })
                     });
                     
@@ -531,7 +595,10 @@ export default function Dashboard() {
     const handleDeleteAccount = async (id: string) => {
         if (!confirm("Voulez-vous vraiment détruire ce nœud de la base de données ?")) return;
         const url = platform === 'TWITTER' ? `http://localhost:4000/api/twitter-accounts/${id}` : `http://localhost:4000/api/accounts/${id}`;
-        const response = await fetch(url, { method: 'DELETE' });
+        const response = await fetch(url, { 
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (!response.ok) {
             const err = await response.json().catch(() => ({ error: 'Unknown error' }));
             alert(`Delete failed: ${err.error || 'Unknown error'}`);
@@ -541,6 +608,11 @@ export default function Dashboard() {
         // Refresh UI
         if (activeAccount && accounts.find(a => a.id === id)?.username === activeAccount) setActiveAccount('');
         fetchAccounts(platform);
+    };
+
+    const handleLogout = () => {
+        localStorage.clear();
+        router.push('/login');
     };
 
     const activeAccObj = accounts.find(a => a.username === activeAccount);
@@ -561,7 +633,55 @@ export default function Dashboard() {
                                 selectedAccount={selectedAccount}
                                 profileForm={profileForm}
                                 onProfileFormChange={setProfileForm}
+                                token={token}
+                                onClose={() => setShowNewFeatures(false)}
                             />
+            </div>
+        );
+    }
+
+    if (isBlocked) {
+        return (
+            <div className="min-h-screen bg-[#030303] text-white flex flex-col items-center justify-center p-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-violet-600/10 rounded-full blur-[120px] pointer-events-none" />
+                <div className="absolute bottom-0 left-0 w-[600px] h-[600px] bg-indigo-900/10 rounded-full blur-[150px] pointer-events-none" />
+                
+                <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="max-w-md w-full bg-[#0A0A0B] border border-white/10 rounded-[40px] p-10 text-center relative z-10 shadow-2xl"
+                >
+                    <div className="w-20 h-20 bg-rose-500/10 rounded-3xl flex items-center justify-center mx-auto mb-8 animate-pulse">
+                        <Lock size={40} className="text-rose-500" />
+                    </div>
+                    
+                    <h2 className="text-3xl font-bold mb-4 bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent">
+                        Abonnement Requis
+                    </h2>
+                    
+                    <p className="text-white/40 mb-8 leading-relaxed">
+                        {blockedMessage || "Votre compte est en attente d'activation. Veuillez contacter l'administrateur pour finaliser votre abonnement et accéder au bot."}
+                    </p>
+                    
+                    <div className="space-y-4">
+                        <div className="p-4 bg-white/5 rounded-2xl border border-white/10 text-xs text-left">
+                            <p className="text-white/60 font-medium mb-1 uppercase tracking-widest">Instructions :</p>
+                            <p className="text-white/30 italic">Envoyez votre paiement à l'administrateur. Une fois reçu, votre accès sera activé immédiatement pour la durée choisie.</p>
+                        </div>
+                        
+                        <button 
+                            onClick={handleLogout}
+                            className="w-full py-4 bg-white/5 hover:bg-white/10 rounded-2xl font-semibold transition-all border border-white/10 flex items-center justify-center gap-2"
+                        >
+                            <LogOut size={18} />
+                            Se déconnecter
+                        </button>
+                    </div>
+                </motion.div>
+                
+                <p className="mt-12 text-white/20 text-sm flex items-center gap-2">
+                    <Shield size={14} /> GhostContent • Sécurisé par Antigravity
+                </p>
             </div>
         );
     }
@@ -573,7 +693,7 @@ export default function Dashboard() {
             <div className={`absolute bottom-0 left-0 w-[600px] h-[600px] rounded-full blur-[150px] pointer-events-none transition-colors duration-1000 ${platform === 'TWITTER' ? 'bg-cyan-900/10' : 'bg-indigo-900/10'}`} suppressHydrationWarning />
 
             {/* Sidebar */}
-            <aside className="w-20 lg:w-24 border-r border-white/5 flex flex-col items-center py-8 gap-8 bg-black/40 backdrop-blur-xl z-50">
+            <aside className="w-20 lg:w-24 h-screen sticky top-0 border-r border-white/5 flex flex-col items-center py-8 gap-8 bg-black/40 backdrop-blur-xl z-50 overflow-y-auto">
                 <div className="flex flex-col gap-4">
                     <motion.div 
                         title="Switch to Instagram"
@@ -598,7 +718,7 @@ export default function Dashboard() {
 
                 <div className="w-8 h-[1px] bg-white/10 my-2" />
 
-                <nav className="flex flex-col gap-6 items-center w-full relative">
+                <nav className="flex flex-col gap-6 items-center w-full relative flex-1 min-h-0">
                     <SidebarIcon icon={<LayoutDashboard size={22} />} active={viewMode === 'SINGLE'} onClick={() => setViewMode('SINGLE')} title="Single Node View" />
                     <SidebarIcon icon={<Monitor size={22} />} active={viewMode === 'GRID'} onClick={() => setViewMode('GRID')} title="Grid Matrix View" />
                     <SidebarIcon icon={<Server size={22} />} active={viewMode === 'PROXIES'} onClick={() => setViewMode('PROXIES')} title="Proxy Matrix" />
@@ -616,7 +736,7 @@ export default function Dashboard() {
 
                     <SidebarIcon icon={<FolderTree size={22} />} active={showNewFeatures} onClick={() => setShowNewFeatures(true)} title="🌟 Fonctionnalités Avancées - Groupes, Templates, Stats" />
 
-                    <div className="w-8 h-[1px] bg-gradient-to-r from-blue-500 to-purple-500 my-2 rounded-full" />
+                    <div className="w-8 h-1 bg-gradient-to-r from-violet-500 to-purple-500 my-2 rounded-full" />
 
                     <motion.button 
                         whileHover={{ scale: 1.1 }}
@@ -627,6 +747,16 @@ export default function Dashboard() {
                     >
                         <Plus size={24} className="text-white/50 group-hover:text-white transition-colors" />
                     </motion.button>
+
+                    <div className="flex-1" />
+
+                    <div className="w-8 h-[1px] bg-white/10 my-2" />
+
+                    {user?.role === 'ADMIN' && (
+                        <SidebarIcon icon={<Shield size={22} className="text-amber-400" />} active={false} onClick={() => router.push('/admin')} title="Administration Console" />
+                    )}
+
+                    <SidebarIcon icon={<LogOut size={22} className="text-rose-500" />} active={false} onClick={handleLogout} title="Logout" />
                 </nav>
             </aside>
 
@@ -637,14 +767,16 @@ export default function Dashboard() {
                 <header className="h-24 border-b border-white/5 flex items-center justify-between px-10 bg-black/20 backdrop-blur-md z-20 transition-all duration-500">
                     <div>
                         <h2 className="text-2xl font-semibold tracking-tight flex items-center gap-3">
-                            {platform === 'TWITTER' ? (
-                                <span className="flex items-center gap-3"><Twitter className="text-blue-400" /> Duupflow <span className="font-light text-blue-400">X-Automation</span></span>
-                            ) : (
-                                <span className="flex items-center gap-3"><Instagram className="text-pink-500" /> Duupflow <span className="font-light text-pink-500">Insta-Bot</span></span>
-                            )}
+                            <Ghost className="text-violet-400 w-8 h-8" />
+                            Ghost<span className="font-light text-violet-400">Content</span>
                         </h2>
                         <p className="text-xs text-white/40 mt-1 flex items-center gap-2 uppercase tracking-widest">
                             <Activity size={10} className="text-emerald-400" /> System Online • {accounts.length} Node(s)
+                            {user?.subscriptionExpiresAt && (
+                                <span className="ml-4 flex items-center gap-1.5 text-violet-400/80 normal-case bg-violet-400/10 px-2 py-0.5 rounded-full text-[10px] font-medium border border-violet-400/20">
+                                    <Crown size={10} /> Expire le {new Date(user.subscriptionExpiresAt).toLocaleDateString()}
+                                </span>
+                            )}
                         </p>
                     </div>
 
@@ -1174,13 +1306,13 @@ export default function Dashboard() {
                 {showAddModal && (
                     <motion.div 
                         key="modal-wrapper"
-                        className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md"
+                        className="fixed inset-0 z-[100] flex items-start justify-center p-6 bg-black/60 backdrop-blur-md overflow-y-auto"
                     >
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
-                            className="absolute inset-0"
+                            className="fixed inset-0"
                             onClick={() => setShowAddModal(false)}
                         />
                         <motion.form
@@ -1189,7 +1321,7 @@ export default function Dashboard() {
                             exit={{ opacity: 0, scale: 0.95, y: 20 }}
                             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                             onSubmit={handleAddAccount}
-                            className="w-full max-w-lg bg-[#0f0f11] border border-white/10 rounded-3xl p-8 relative shadow-[0_0_50px_rgba(0,0,0,0.5)] z-10"
+                            className="w-full max-w-2xl bg-[#0f0f11] border border-white/20 rounded-[40px] p-10 relative shadow-[0_0_80px_rgba(0,0,0,0.8)] z-10 my-auto overflow-y-auto max-h-[95vh]"
                         >
                             <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-fuchsia-500/5 rounded-3xl pointer-events-none" />
                             
@@ -1698,13 +1830,13 @@ function SidebarIcon({ icon, active, onClick, title }: { icon: any, active?: boo
         <div className="relative group w-full flex justify-center" title={title}>
             <div 
                 onClick={onClick} 
-                className={`p-3 rounded-xl cursor-pointer transition-all duration-300 relative z-10 w-12 flex justify-center 
-                ${active ? 'text-white bg-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                className={`p-3.5 rounded-2xl cursor-pointer transition-all duration-300 relative z-10 w-14 flex justify-center 
+                ${active ? 'text-white bg-white/10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)]' : 'text-white/60 hover:text-white hover:bg-white/10 hover:scale-110'}`}
             >
                 {icon}
             </div>
             {active && (
-                <motion.div layoutId="sidebar-active" className="absolute left-1/2 -translate-x-1/2 w-12 top-0 bottom-0 bg-white/5 rounded-xl -z-10" />
+                <motion.div layoutId="sidebar-active" className="absolute left-1/2 -translate-x-1/2 w-14 top-0 bottom-0 bg-white/10 rounded-2xl -z-10 shadow-[0_0_20px_rgba(255,255,255,0.05)]" />
             )}
         </div>
     );
@@ -1953,7 +2085,7 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
 function Input({ label, value, onChange, type = "text", icon, placeholder }: { label: string, value: string, onChange: (v: string) => void, type?: string, icon?: any, placeholder?: string }) {
     return (
         <div className="space-y-1.5">
-            <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">
+            <label className="text-xs uppercase font-bold tracking-[0.15em] text-white/60 ml-1">
                 {label}
             </label>
             <div className="relative">
@@ -1963,7 +2095,7 @@ function Input({ label, value, onChange, type = "text", icon, placeholder }: { l
                     value={value} 
                     onChange={(e) => onChange(e.target.value)}
                     className={`w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none ${icon ? 'pl-10' : 'pl-4'} pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] placeholder:text-white/20`}
-                    placeholder={placeholder || `Enter ${label.toLowerCase()}...`}
+                    placeholder={placeholder || `name@exemple.com`}
                 />
             </div>
         </div>

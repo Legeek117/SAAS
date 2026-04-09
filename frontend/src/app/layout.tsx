@@ -5,8 +5,8 @@ import './globals.css'
 // const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-    title: 'InstaAuto SaaS',
-    description: 'Professional Instagram Automation Tool',
+    title: 'GhostContent SaaS',
+    description: 'Professional Content Automation Tool',
 }
 
 export default function RootLayout({
