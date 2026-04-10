@@ -636,18 +636,39 @@ async function doManualLogin(
 async function validateSession(page: Page, emitLog: (msg: string) => void): Promise<boolean> {
     try {
         emitLog("🔄 Vérification de la session existante...");
-        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await sleep(2000);
 
-        // Check if we landed on home and have the primary nav
-        await page.waitForSelector(
-            '[data-testid="SideNav_AccountSwitcher_Button"], nav[aria-label="Primary"]',
-            { timeout: 15000 }
-        );
+        // Check for "Something went wrong" / Retry button
+        const retryBtn = page.locator('span:has-text("Retry"), span:has-text("Réessayer"), [data-testid="empty_state_button_text"]').first();
+        if (await retryBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+            emitLog("⚠️ Twitter affiche une erreur 'Retry'. Tentative de relance...");
+            await retryBtn.click().catch(() => page.reload());
+            await sleep(5000);
+        }
 
-        emitLog("✅ Session valide - Accès direct accordé !");
-        return true;
-    } catch {
-        emitLog("⚠️ Session expirée ou invalide - Reconnexion requise.");
+        // Check if we are on the login page (means cookies failed)
+        if (page.url().includes('/login')) {
+            emitLog("❌ Redirigé vers /login - Session invalide.");
+            return false;
+        }
+
+        // Check for successful authentication indicators
+        const authenticated = await Promise.race([
+            page.waitForSelector('[data-testid="SideNav_AccountSwitcher_Button"]', { timeout: 15000 }).then(() => true),
+            page.waitForSelector('nav[aria-label="Primary"], [data-testid="AppTabBar_Home_Link"]', { timeout: 15000 }).then(() => true),
+            page.waitForSelector('[data-testid="SideNav_NewTweet_Button"]', { timeout: 15000 }).then(() => true)
+        ]).catch(() => false);
+
+        if (authenticated) {
+            emitLog("✅ Session valide - Accès direct accordé !");
+            return true;
+        }
+
+        emitLog("⚠️ Échec de la vérification de session (timeout).");
+        return false;
+    } catch (error: any) {
+        emitLog(`⚠️ Erreur lors de la vérification de session : ${error.message}`);
         return false;
     }
 }
@@ -685,8 +706,27 @@ async function doWarmUp(page: Page, emitLog: (msg: string) => void) {
 // ─── Auto Like ────────────────────────────────────────────────────────────────
 
 async function doAutoLike(page: Page, emitLog: (msg: string) => void, config: any) {
-    const count = config?.count || randomRange(5, 12);
-    emitLog(`❤️ Auto-Like : Targeting ${count} OnlyFans posts...`);
+    const count = config?.count || randomRange(4, 6);
+    emitLog(`❤️ Natural liking (${count} posts)...`);
+
+    // IF specific URL provided (Social Orchestration)
+    if (config?.url) {
+        emitLog(`🎯 Directed Like on: ${config.url}`);
+        await page.goto(config.url, { waitUntil: 'networkidle', timeout: 30000 });
+        await sleep(randomRange(3000, 5000));
+        
+        const likeBtn = page.locator('[data-testid="like"]').first();
+        if (await likeBtn.isVisible({ timeout: 5000 })) {
+            const label = await likeBtn.getAttribute('aria-label');
+            if (label && label.toLowerCase().includes('like') && !label.toLowerCase().includes('liked')) {
+                await humanClick(page, likeBtn);
+                emitLog(`✅ Orchestration like successful.`);
+            } else {
+                emitLog(`ℹ️ Already liked or button state unclear.`);
+            }
+            return;
+        }
+    }
 
     // ONLY search for OnlyFans content
     const onlyfansKeywords = [
@@ -861,7 +901,29 @@ const AUTO_COMMENTS = [
 async function doAutoComment(page: Page, emitLog: (msg: string) => void, config: any) {
     const count = config?.count || randomRange(2, 4);
     const customComments = config?.comments || AUTO_COMMENTS;
-    emitLog(`💬 Leaving ${count} natural comments on OnlyFans content...`);
+    emitLog(`💬 Leaving ${count} natural comments...`);
+    
+    // IF specific URL provided (Social Orchestration)
+    if (config?.url) {
+        emitLog(`🎯 Directed engagement on: ${config.url}`);
+        await page.goto(config.url, { waitUntil: 'networkidle', timeout: 30000 });
+        await sleep(randomRange(3000, 5000));
+        
+        const replyBtn = page.locator('[data-testid="reply"]').first();
+        if (await replyBtn.isVisible({ timeout: 5000 })) {
+            await humanClick(page, replyBtn);
+            await sleep(2000);
+            
+            const textArea = '[data-testid="tweetTextarea_0"]';
+            const comment = customComments[randomRange(0, customComments.length - 1)];
+            await humanType(page, textArea, comment);
+            await sleep(2000);
+            
+            await humanClick(page, page.locator('[data-testid="tweetButton"]').first());
+            emitLog(`✅ Orchestration comment posted.`);
+            return;
+        }
+    }
 
     // Search ONLY for OnlyFans content creators
     const onlyfansKeywords = [
@@ -941,7 +1003,7 @@ const AUTO_TWEETS = [
     "Premium content now available! Don't miss out 💎🔥",
 ];
 
-async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: any) {
+async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: any, username: string) {
     emitLog("📝 Auto-Post : Publication d'un tweet...");
 
     // Navigate to home
@@ -1062,12 +1124,39 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
             await humanClick(page, tweetBtn);
             await sleep(randomRange(3000, 5000));
             emitLog("✅ Tweet published successfully!");
+        
+            // Try to get the post URL by visiting the profile
+            await sleep(2000);
+            await page.goto(`https://x.com/${username}`, { waitUntil: 'networkidle', timeout: 30000 });
+            await sleep(3000);
+            
+            const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
+            if (await firstTweetLink.isVisible({ timeout: 5000 }).catch(() => false)) {
+                const href = await firstTweetLink.getAttribute('href');
+                if (href) {
+                    const postUrl = `https://x.com${href}`;
+                    emitLog(`🔗 Post URL found: ${postUrl}`);
+                    return { success: true, postUrl };
+                }
+            }
         } else {
             emitLog("⚠️ Tweet button not found or disabled");
             // Try posting with Enter key
             await page.keyboard.press('Control+Enter');
-            await sleep(3000);
+            await sleep(5000);
             emitLog("✅ Posted with keyboard shortcut");
+            
+            // Extract URL same way
+            await page.goto(`https://x.com/${username}`, { waitUntil: 'networkidle', timeout: 30000 });
+            const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
+            if (await firstTweetLink.isVisible().catch(() => false)) {
+                const href = await firstTweetLink.getAttribute('href');
+                if (href) {
+                    const postUrl = `https://x.com${href}`;
+                    emitLog(`🔗 Post URL found (shortcut): ${postUrl}`);
+                    return { success: true, postUrl };
+                }
+            }
         }
         
     } catch (e: any) {
@@ -1080,7 +1169,7 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
 
 // ─── Scheduled Post ───────────────────────────────────────────────────────────
 
-async function doScheduledPost(page: Page, emitLog: (msg: string) => void, postId: string) {
+async function doScheduledPost(page: Page, emitLog: (msg: string) => void, postId: string, username: string) {
     emitLog("📅 Publication planifiée...");
     
     try {
@@ -1175,13 +1264,24 @@ async function doScheduledPost(page: Page, emitLog: (msg: string) => void, postI
                 }
             });
 
-            // Notify backend
-            socket.emit('worker_log', {
-                username: post.account.username,
-                message: `📝 Tweet publié: "${post.content.substring(0, 50)}..."`
-            });
+            emitLog("✅ Tweet published successfully!");
+            
+            // Try to get the post URL by visiting the profile
+            await sleep(2000);
+            await page.goto(`https://x.com/${username}`, { waitUntil: 'networkidle', timeout: 30000 });
+            await sleep(3000);
+            
+            const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
+            if (await firstTweetLink.isVisible({ timeout: 5000 }).catch(() => false)) {
+                const href = await firstTweetLink.getAttribute('href');
+                if (href) {
+                    const postUrl = `https://x.com${href}`;
+                    emitLog(`🔗 Post URL found: ${postUrl}`);
+                    return { success: true, postUrl };
+                }
+            }
 
-            await sleep(randomRange(3000, 5000));
+            return { success: true };
         } else {
             emitLog("❌ Bouton Tweet introuvable");
             await prisma.twitterPost.update({
@@ -1453,21 +1553,26 @@ export const twitterWorkerHandler = async (job: any) => {
                 await doAutoComment(page, emitLog, config);
                 break;
             case 'autoPost':
-                await doAutoPost(page, emitLog, config);
+                const autoPostResult = await doAutoPost(page, emitLog, config, username);
+                if (autoPostResult?.postUrl) job.data.postUrl = autoPostResult.postUrl;
                 break;
             case 'post':
                 // Scheduled post from queue
                 if (config?.postId) {
-                    await doScheduledPost(page, emitLog, config.postId);
+                    const schedPostResult = await doScheduledPost(page, emitLog, config.postId, username);
+                    // @ts-ignore
+                    if (schedPostResult?.postUrl) job.data.postUrl = schedPostResult.postUrl;
                 } else {
-                    await doAutoPost(page, emitLog, config);
+                    const autoPostResult2 = await doAutoPost(page, emitLog, config, username);
+                    if (autoPostResult2?.postUrl) job.data.postUrl = autoPostResult2.postUrl;
                 }
                 break;
             case 'spamComments':
                 await doAutoComment(page, emitLog, { count: config?.count || 5 });
                 break;
             case 'postCommunity':
-                await doAutoPost(page, emitLog, config);
+                const communityPostResult = await doAutoPost(page, emitLog, config, username);
+                if (communityPostResult?.postUrl) job.data.postUrl = communityPostResult.postUrl;
                 break;
             default:
                 emitLog(`⚠️ Action inconnue : ${action}`);

@@ -2,7 +2,7 @@
   "cookies": [
     {
       "name": "auth_token",
-      "value": "f502062f431a61df66f78b4917a209bcc6448c71",
+      "value": "8bbfbb5f4b0fe3abffb2d90a53fa7684ef523fea",
       "domain": ".x.com",
       "path": "/",
       "expires": -1,
@@ -12,20 +12,20 @@
     },
     {
       "name": "guest_id_ads",
-      "value": "v1%3A177578054626356315",
+      "value": "v1%3A177580855480618275",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1810346526.54422,
+      "expires": 1810375225.302507,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "guest_id_marketing",
-      "value": "v1%3A177578054626356315",
+      "value": "v1%3A177580855480618275",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1810346526.544358,
+      "expires": 1810375225.302611,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -42,60 +42,60 @@
     },
     {
       "name": "personalization_id",
-      "value": "\"v1_MD4OAOaBmkqQ2Zi5ZVy88w==\"",
+      "value": "\"v1_kGYK4lj0ytmQDYLZBzd7RQ==\"",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1810340546.507814,
+      "expires": 1810368555.141336,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "guest_id",
-      "value": "v1%3A177578054626356315",
+      "value": "v1%3A177580855480618275",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1810340546.507841,
+      "expires": 1810368555.14137,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "twid",
-      "value": "u%3D2040942174875828224",
+      "value": "u%3D2038370214115418112",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1807322526.54441,
+      "expires": 1807351225.302667,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "ct0",
-      "value": "a7dd9ee89c296d4a3854e0b611a6724ae99d3d13652a4fddd41df4e87fffb68bf55acf1e818ca726217fd629d0778c4c1a019319958630fdcdf4345bb0d7be41803f648989d2c04b52440bc5f90a5459",
+      "value": "9abf82a1dad5096684fa5fb69da203ca9cdbfab1d04ade583033bb91f07caf6b13826d9085356b6ba7a3266c1bf5417bd94afca4ba5a3f0bad38741c94acda6fbb6467cad184dd6efbb530ab441c87c8",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1810340546.507887,
+      "expires": 1810368555.141437,
       "httpOnly": false,
       "secure": true,
       "sameSite": "Lax"
     },
     {
       "name": "__cuid",
-      "value": "805f63954b2541e99ac2d8094042d62a",
+      "value": "d7a78ac9083b48b1ae4381fb2470b642",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1810346529,
+      "expires": 1810375229,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "__cf_bm",
-      "value": "a.J2zNrWahqQ24lWU8fiMd.1xjtuK_ysZKA2dsXBMDc-1775786507.7638562-1.0.1.1-u8Pj7l0dI9I_1GrpSF90OLY2aLzJ1abMmTCIdojGFf4fVeHJfZyaVJxxd7LqpLbCnaI6U3t6M_AzlKPn0CbsQPA7t2.vOJYVVSSMxkV7poAM9NEG1X760BdWMvg2Uofy",
+      "value": "QpgBOKmecnONKdthE79gW75vZ0c0dqkl8ubSxlml3WE-1775815183.1949224-1.0.1.1-L_oQUeH1otD75EkMVK_vi1ElyrfwVD5mSd8ZbPB.rqswtCZXZQmmskHldliXn5eatyyB3JWu9UVX7QBbm0PN5Ay0Q7aS0bFibJilfV7hpueJkbUoGB0O06e8ArF.N9Lk",
       "domain": ".x.com",
       "path": "/",
-      "expires": 1775788308.408697,
+      "expires": 1775816983.608006,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
@@ -111,16 +111,16 @@
       "pageYOffset": 0,
       "screenX": 0,
       "hasHDR": true,
-      "width": 440,
-      "height": 956,
-      "availWidth": 440,
-      "availHeight": 956,
+      "width": 393,
+      "height": 852,
+      "availWidth": 393,
+      "availHeight": 852,
       "clientWidth": 0,
       "clientHeight": 20,
       "innerWidth": 0,
       "innerHeight": 0,
-      "outerWidth": 440,
-      "outerHeight": 884,
+      "outerWidth": 393,
+      "outerHeight": 852,
       "colorDepth": 24,
       "pixelDepth": 24,
       "devicePixelRatio": 3
@@ -295,6 +295,6 @@
     "deviceScaleFactor": 3,
     "platform": "iPhone"
   },
-  "createdAt": "2026-04-08T12:11:28.385Z",
-  "lastUsed": "2026-04-10T02:02:58.242Z"
+  "createdAt": "2026-04-10T08:09:12.098Z",
+  "lastUsed": "2026-04-10T10:00:57.993Z"
 }

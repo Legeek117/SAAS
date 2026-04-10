@@ -141,6 +141,8 @@ export default function Dashboard() {
         return 'TWITTER';
     });
     const [showAddModal, setShowAddModal] = useState(false);
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [editingAccount, setEditingAccount] = useState<any>(null);
     const [showTokenGuide, setShowTokenGuide] = useState(false);
     const [showNewFeatures, setShowNewFeatures] = useState(false);
     const router = useRouter();
@@ -416,38 +418,49 @@ export default function Dashboard() {
         
         const url = platform === 'TWITTER' ? 'http://localhost:4000/api/twitter-accounts' : 'http://localhost:4000/api/accounts';
         try {
-            // For Twitter, build cookies array from simple input values
+            // For Twitter, build cookies array from simple input values or JSON
             let cookiesArray = undefined;
             if (platform === 'TWITTER') {
-                if (!twitterCookies.trim()) {
-                    alert('Erreur: Le cookie auth_token est requis');
+                const cookieInput = twitterCookies.trim();
+                if (!cookieInput) {
+                    alert('Erreur: Les cookies sont requis');
                     return;
                 }
                 
-                // Build the cookies array automatically
-                cookiesArray = [
-                    {
-                        name: 'auth_token',
-                        value: twitterCookies.trim(),
-                        domain: '.x.com',
-                        path: '/',
-                        secure: true,
-                        httpOnly: true,
-                        sameSite: 'Lax'
+                // Try treating it as a raw JSON array first (from EditThisCookie or similar)
+                if (cookieInput.startsWith('[') && cookieInput.endsWith(']')) {
+                    try {
+                        cookiesArray = JSON.parse(cookieInput);
+                    } catch (e) {
+                        alert('Erreur: Le format JSON fourni n\'est pas valide');
+                        return;
                     }
-                ];
+                } else {
+                    // Fallback to the old method: treat input as auth_token value
+                    cookiesArray = [
+                        {
+                            name: 'auth_token',
+                            value: cookieInput,
+                            domain: '.x.com',
+                            path: '/',
+                            secure: true,
+                            httpOnly: true,
+                            sameSite: 'Lax'
+                        }
+                    ];
 
-                // Add ct0 if provided
-                if (twitterCt0.trim()) {
-                    cookiesArray.push({
-                        name: 'ct0',
-                        value: twitterCt0.trim(),
-                        domain: '.x.com',
-                        path: '/',
-                        secure: true,
-                        httpOnly: false,
-                        sameSite: 'Lax'
-                    });
+                    // Add ct0 if provided
+                    if (twitterCt0.trim()) {
+                        cookiesArray.push({
+                            name: 'ct0',
+                            value: twitterCt0.trim(),
+                            domain: '.x.com',
+                            path: '/',
+                            secure: true,
+                            httpOnly: false,
+                            sameSite: 'Lax'
+                        });
+                    }
                 }
             }
 
@@ -488,6 +501,85 @@ export default function Dashboard() {
             fetchAccounts(platform);
         } catch (error: any) {
             alert(`Erreur: ${error.message}`);
+        }
+    };
+
+    const handleEditAccount = (acc: any) => {
+        setEditingAccount(acc);
+        setNewAcc({
+            username: acc.username,
+            password: acc.password || '',
+            email: acc.email || '',
+            proxyHost: acc.proxy?.host || '',
+            proxyPort: acc.proxy?.port?.toString() || '',
+            proxyUsername: acc.proxy?.username || '',
+            proxyPassword: acc.proxy?.password || '',
+            type: acc.type || 'MAIN',
+            authToken: '',
+            groupId: acc.groupId || ''
+        });
+        setTwitterCookies('');
+        setShowEditModal(true);
+    };
+
+    const handleUpdateAccount = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingAccount || !token) return;
+
+        const url = platform === 'TWITTER' 
+            ? `http://localhost:4000/api/twitter-accounts/${editingAccount.id}` 
+            : `http://localhost:4000/api/accounts/${editingAccount.id}`;
+            
+        try {
+            let cookiesArray = undefined;
+            if (platform === 'TWITTER' && twitterCookies.trim()) {
+                const cookieInput = twitterCookies.trim();
+                // Try JSON or auth_token
+                if (cookieInput.startsWith('[') && cookieInput.endsWith(']')) {
+                    cookiesArray = JSON.parse(cookieInput);
+                } else {
+                    cookiesArray = [{
+                        name: 'auth_token',
+                        value: cookieInput,
+                        domain: '.x.com',
+                        path: '/',
+                        secure: true,
+                        httpOnly: true,
+                        sameSite: 'Lax'
+                    }];
+                }
+            }
+
+            const response = await fetch(url, {
+                method: 'PUT',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    username: newAcc.username,
+                    password: newAcc.password,
+                    email: newAcc.email,
+                    type: newAcc.type,
+                    groupId: newAcc.groupId,
+                    sessionCookies: cookiesArray,
+                    proxy: newAcc.proxyHost ? { 
+                        host: newAcc.proxyHost, 
+                        port: parseInt(newAcc.proxyPort),
+                        username: newAcc.proxyUsername,
+                        password: newAcc.proxyPassword
+                    } : undefined
+                })
+            });
+            
+            if (!response.ok) throw new Error('Update failed');
+            
+            setShowEditModal(false);
+            setEditingAccount(null);
+            fetchAccounts(platform);
+        } catch (e) {
+            console.error("Failed to update account", e);
+            alert("Erreur lors de la mise à jour");
         }
     };
 
@@ -1133,6 +1225,13 @@ export default function Dashboard() {
                                                             </td>
                                                             <td className="px-6 py-4 text-right">
                                                                 <button 
+                                                                    onClick={() => handleEditAccount(acc)}
+                                                                    className="p-2 bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white rounded-lg transition-colors border border-blue-500/20 shadow-sm mr-2"
+                                                                    title="Edit Settings"
+                                                                >
+                                                                    <Edit size={16} />
+                                                                </button>
+                                                                <button 
                                                                     onClick={() => handleDeleteAccount(acc.id)}
                                                                     className="p-2 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white rounded-lg transition-colors border border-rose-500/20 shadow-sm"
                                                                     title="Destroy Node"
@@ -1402,34 +1501,17 @@ export default function Dashboard() {
                                             <div className="space-y-3">
                                                 <div>
                                                     <label className="text-[11px] font-medium text-blue-300 mb-1 block">
-                                                        Auth Token <span className="text-red-400">*</span>
+                                                        Cookies (JSON Array ou auth_token) <span className="text-red-400">*</span>
                                                     </label>
-                                                    <input
-                                                        type="text"
+                                                    <textarea
                                                         value={twitterCookies}
                                                         onChange={(e) => setTwitterCookies(e.target.value)}
-                                                        placeholder="Collez la valeur du cookie auth_token ici"
-                                                        className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all"
+                                                        placeholder='[{"name": "auth_token", "value": "..."}, ...]'
+                                                        className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all min-h-[80px]"
                                                         required
                                                     />
                                                     <p className="text-[10px] text-blue-400/60 mt-1">
-                                                        F12 → Application → Cookies → auth_token → Copier la valeur
-                                                    </p>
-                                                </div>
-
-                                                <div>
-                                                    <label className="text-[11px] font-medium text-blue-300 mb-1 block">
-                                                        CT0 (CSRF Token) <span className="text-slate-500">(optionnel)</span>
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={twitterCt0}
-                                                        onChange={(e) => setTwitterCt0(e.target.value)}
-                                                        placeholder="Collez la valeur du cookie ct0 ici"
-                                                        className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all"
-                                                    />
-                                                    <p className="text-[10px] text-blue-400/60 mt-1">
-                                                        F12 → Application → Cookies → ct0 → Copier la valeur
+                                                        Conseillé : Utilisez "EditThisCookie" (JSON) pour exporter tous les cookies
                                                     </p>
                                                 </div>
                                             </div>
@@ -1466,6 +1548,136 @@ export default function Dashboard() {
                                     className="w-full bg-white text-black py-4 rounded-xl font-semibold mt-4 hover:bg-white/90 transition-colors shadow-lg flex items-center justify-center gap-2"
                                 >
                                     <Play size={18} fill="currentColor" /> Initialize Node
+                                </motion.button>
+                            </div>
+                        </motion.form>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Edit Account Modal */}
+            <AnimatePresence>
+                {showEditModal && editingAccount && (
+                    <motion.div 
+                        key="edit-modal-wrapper"
+                        className="fixed inset-0 z-[100] flex items-start justify-center p-6 bg-black/60 backdrop-blur-md overflow-y-auto"
+                    >
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0"
+                            onClick={() => setShowEditModal(false)}
+                        />
+                        <motion.form
+                            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                            onSubmit={handleUpdateAccount}
+                            className="w-full max-w-2xl bg-[#0f0f11] border border-white/20 rounded-[40px] p-10 relative shadow-[0_0_80px_rgba(0,0,0,0.8)] z-10 my-auto overflow-y-auto max-h-[95vh]"
+                        >
+                            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-violet-500/5 rounded-3xl pointer-events-none" />
+                            
+                            <button type="button" onClick={() => setShowEditModal(false)} className="absolute top-6 right-6 p-2 bg-white/5 hover:bg-white/10 rounded-full text-white/50 hover:text-white transition-colors">
+                                <X size={16} />
+                            </button>
+                            
+                            <h3 className="text-2xl font-semibold mb-2">
+                                Edit {editingAccount.username}
+                            </h3>
+                            <p className="text-sm text-white/40 mb-8">
+                                Mettre à jour les paramètres de connexion ou le proxy.
+                            </p>
+                            
+                            <div className="space-y-5">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <Input label="Username" icon={<Users size={16}/>} value={newAcc.username} onChange={(v: string) => setNewAcc({ ...newAcc, username: v })} />
+                                    <Input label="Password" type="password" value={newAcc.password} onChange={(v: string) => setNewAcc({ ...newAcc, password: v })} />
+                                </div>
+
+                                {platform === 'TWITTER' && (
+                                    <>
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Account Role</label>
+                                            <div className="relative">
+                                                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><Briefcase size={16} /></div>
+                                                <select 
+                                                    value={newAcc.type} 
+                                                    onChange={(e) => setNewAcc({...newAcc, type: e.target.value})}
+                                                    className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
+                                                >
+                                                    <option value="MAIN">MAIN (Model)</option>
+                                                    <option value="SUPPORT">SUPPORT (Spammer)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Groupe</label>
+                                            <div className="relative">
+                                                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><FolderTree size={16} /></div>
+                                                <select 
+                                                    value={newAcc.groupId} 
+                                                    onChange={(e) => setNewAcc({...newAcc, groupId: e.target.value})}
+                                                    className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
+                                                >
+                                                    <option value="">Sélectionner un groupe...</option>
+                                                    {availableGroups.map(group => (
+                                                        <option key={group.id} value={group.id}>
+                                                            {group.name} ({group.taskType})
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+
+                                        <div className="p-4 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/20 rounded-2xl space-y-4">
+                                            <div className="flex items-start justify-between mb-2">
+                                                <h4 className="text-sm font-semibold text-blue-400">🍪 Update cookies</h4>
+                                                <p className="text-[10px] text-blue-400/60">Laissez vide si inchangé</p>
+                                            </div>
+                                            
+                                            <div className="space-y-3">
+                                                <div>
+                                                    <label className="text-[11px] font-medium text-blue-300 mb-1 block">
+                                                        Cookies JSON (Array) ou auth_token
+                                                    </label>
+                                                    <textarea
+                                                        value={twitterCookies}
+                                                        onChange={(e) => setTwitterCookies(e.target.value)}
+                                                        placeholder='Laissez vide pour conserver les cookies actuels'
+                                                        className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all min-h-[80px]"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                                
+                                <div className="p-4 bg-white/[0.02] border border-white/5 rounded-2xl space-y-4">
+                                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-white/50">
+                                        <Server size={14} /> Network Configuration (Proxy)
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div className="col-span-2">
+                                            <Input label="Proxy Host" value={newAcc.proxyHost} onChange={(v: string) => setNewAcc({ ...newAcc, proxyHost: v })} placeholder="192.168.1.1" />
+                                        </div>
+                                        <Input label="Port" value={newAcc.proxyPort} onChange={(v: string) => setNewAcc({ ...newAcc, proxyPort: v })} placeholder="8080" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <Input label="Proxy Username" value={newAcc.proxyUsername} onChange={(v: string) => setNewAcc({ ...newAcc, proxyUsername: v })} placeholder="user123" />
+                                        <Input label="Proxy Password" type="password" value={newAcc.proxyPassword} onChange={(v: string) => setNewAcc({ ...newAcc, proxyPassword: v })} placeholder="pass123" />
+                                    </div>
+                                </div>
+
+                                <motion.button 
+                                    whileHover={{ scale: 1.01 }}
+                                    whileTap={{ scale: 0.98 }}
+                                    type="submit" 
+                                    className="w-full bg-blue-500 text-white py-4 rounded-xl font-semibold mt-4 hover:bg-blue-600 transition-colors shadow-lg flex items-center justify-center gap-2"
+                                >
+                                    Sauvegarder les modifications
                                 </motion.button>
                             </div>
                         </motion.form>

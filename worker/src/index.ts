@@ -238,7 +238,8 @@ twitterWorker.on('completed', async (job) => {
             accountId: job.data.accountId,
             status: 'SUCCESS',
             groupId: job.data.groupId,
-            groupName: job.data.groupName
+            groupName: job.data.groupName,
+            postUrl: job.data.postUrl
         });
     } catch (error) {
         console.error('Error emitting job_completed:', error);

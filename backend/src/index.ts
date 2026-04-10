@@ -378,6 +378,17 @@ app.post('/api/twitter-accounts', authenticateToken, async (req: AuthRequest, re
     const finalCt0 = ct0 || (ct0Cookie ? ct0Cookie.value : null);
 
     try {
+        // Check if username already exists
+        const existingTwitterAccount = await prisma.twitterAccount.findUnique({
+            where: { username }
+        });
+
+        if (existingTwitterAccount) {
+            return res.status(400).json({ 
+                error: `Le compte @${username} est déjà enregistré. Veuillez le modifier ou le supprimer s'il s'agit d'une erreur.` 
+            });
+        }
+
         // Ensure temp user exists before creating Twitter account
         await prisma.user.upsert({
             where: { id: 'temp-user-id' },
@@ -411,6 +422,81 @@ app.post('/api/twitter-accounts', authenticateToken, async (req: AuthRequest, re
             }
         });
         res.status(201).json(newAccount);
+    } catch (error: any) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+/**
+ * Update a Twitter account
+ */
+app.put('/api/twitter-accounts/:id', authenticateToken, async (req: AuthRequest, res) => {
+    const { id } = req.params;
+    const { username, password, email, sessionCookies, type, groupId, proxy } = req.body;
+
+    try {
+        // Validate if account exists
+        const existingAccount = await prisma.twitterAccount.findUnique({ where: { id } });
+        if (!existingAccount) {
+            return res.status(404).json({ error: 'Compte non trouvé' });
+        }
+
+        // Update technical fields if provided
+        const updateData: any = {};
+        if (username) {
+            if (username !== existingAccount.username) {
+                const usernameExists = await prisma.twitterAccount.findUnique({
+                    where: { username }
+                });
+                if (usernameExists) {
+                    return res.status(400).json({ error: `Le nom d'utilisateur @${username} est déjà utilisé par un autre compte.` });
+                }
+            }
+            updateData.username = username;
+        }
+        if (password) updateData.password = password;
+        if (email !== undefined) updateData.email = email;
+        if (sessionCookies) updateData.sessionCookies = sessionCookies;
+        if (type) updateData.type = type;
+        if (groupId) updateData.groupId = groupId;
+
+        // Handle proxy update
+        if (proxy) {
+            // First check if a proxy already exists
+            const existingProxy = await prisma.twitterProxy.findUnique({ where: { accountId: id } });
+            if (existingProxy) {
+                await prisma.twitterProxy.update({
+                    where: { accountId: id },
+                    data: {
+                        host: proxy.host,
+                        port: parseInt(proxy.port),
+                        username: proxy.username,
+                        password: proxy.password
+                    }
+                });
+            } else {
+                await prisma.twitterProxy.create({
+                    data: {
+                        accountId: id,
+                        host: proxy.host,
+                        port: parseInt(proxy.port),
+                        username: proxy.username,
+                        password: proxy.password
+                    }
+                });
+            }
+        }
+
+        const updatedAccount = await prisma.twitterAccount.update({
+            where: { id },
+            data: updateData,
+            include: {
+                group: true,
+                proxy: true
+            }
+        });
+
+        res.json(updatedAccount);
     } catch (error: any) {
         res.status(400).json({ error: error.message });
     }
@@ -1079,6 +1165,64 @@ io.on('connection', (socket) => {
                             [actionField]: 1
                         }
                     });
+                }
+            }
+
+            // --- SOCIAL ORCHESTRATION ---
+            // If a post was published, trigger support accounts to engage
+            const postActions = ['post', 'autoPost', 'postCommunity', 'scheduledPost'];
+            if (postActions.includes(data.action) && data.postUrl && account && account.type === 'MAIN') {
+                console.log(`📣 Orchestration: Post detected from ${account.username}. Triggering support engagement...`);
+                
+                // Find support accounts in the same group
+                const supportAccounts = await prisma.twitterAccount.findMany({
+                    where: {
+                        groupId: account.groupId || 'default', // fallback
+                        type: 'SUPPORT',
+                        status: 'ACTIVE',
+                        id: { not: account.id }
+                    }
+                });
+
+                if (supportAccounts.length > 0) {
+                    console.log(`🚀 Scheduling engagement for ${supportAccounts.length} support accounts...`);
+                    
+                    for (let i = 0; i < supportAccounts.length; i++) {
+                        const support = supportAccounts[i];
+                        // Stagger engagement: 10-40 minutes random delay per account
+                        const delay = (10 + Math.random() * 30) * 60 * 1000;
+                        
+                        // Queue Auto-Like
+                        await twitterQueue.add(
+                            `orchestration-like-${support.username}-${Date.now()}`,
+                            {
+                                accountId: support.id,
+                                action: 'autoLike',
+                                config: { 
+                                    url: data.postUrl,
+                                    count: 1 
+                                }
+                            },
+                            { delay: Math.floor(delay), attempts: 2 }
+                        );
+
+                        // Queue Auto-Comment (optional, 50% chance)
+                        if (Math.random() > 0.5) {
+                            await twitterQueue.add(
+                                `orchestration-comment-${support.username}-${Date.now()}`,
+                                {
+                                    accountId: support.id,
+                                    action: 'autoComment',
+                                    config: {
+                                        url: data.postUrl,
+                                        content: "Great content! Keep it up 🔥", 
+                                        count: 1
+                                    }
+                                },
+                                { delay: Math.floor(delay + (2 * 60 * 1000)), attempts: 2 } // 2 min after like
+                            );
+                        }
+                    }
                 }
             }
 
