@@ -1341,14 +1341,21 @@ export default function Dashboard() {
                                         onClick={async () => {
                                             if (!newGroupName) return;
                                             try {
-                                                await fetch('http://localhost:4000/api/groups', {
+                                                const res = await fetch('http://localhost:4000/api/groups', {
                                                     method: 'POST',
                                                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('ghost_token')}` },
-                                                    body: JSON.stringify({ name: newGroupName })
+                                                    body: JSON.stringify({ name: newGroupName, taskType: 'DEFAULT' })
                                                 });
-                                                setNewGroupName('');
-                                                fetchGroups();
-                                            } catch (err) {}
+                                                if (res.ok) {
+                                                    setNewGroupName('');
+                                                    fetchGroups();
+                                                } else {
+                                                    const errorData = await res.json();
+                                                    alert(`Erreur: ${errorData.error || 'Impossible de créer le groupe'}`);
+                                                }
+                                            } catch (err) {
+                                                console.error(err);
+                                            }
                                         }}
                                         className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold transition-colors flex items-center gap-2 shadow-blue-500/20 shadow-lg"
                                     >
@@ -1756,18 +1763,37 @@ export default function Dashboard() {
 
                                 {platform === 'TWITTER' && (
                                     <>
-                                        <div className="space-y-1.5">
-                                            <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Account Role</label>
-                                            <div className="relative">
-                                                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><Briefcase size={16} /></div>
-                                                <select 
-                                                    value={newAcc.type} 
-                                                    onChange={(e) => setNewAcc({...newAcc, type: e.target.value})}
-                                                    className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
-                                                >
-                                                    <option value="MAIN">MAIN (Model)</option>
-                                                    <option value="SUPPORT">SUPPORT (Spammer)</option>
-                                                </select>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Account Role</label>
+                                                <div className="relative">
+                                                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><Briefcase size={16} /></div>
+                                                    <select 
+                                                        value={newAcc.type} 
+                                                        onChange={(e) => setNewAcc({...newAcc, type: e.target.value})}
+                                                        className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
+                                                    >
+                                                        <option value="MAIN">MAIN (Model)</option>
+                                                        <option value="SUPPORT">SUPPORT (Spammer)</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-1.5">
+                                                <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Assign to Group</label>
+                                                <div className="relative">
+                                                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><FolderTree size={16} /></div>
+                                                    <select 
+                                                        value={newAcc.groupId || ''} 
+                                                        onChange={(e) => setNewAcc({...newAcc, groupId: e.target.value})}
+                                                        className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
+                                                    >
+                                                        <option value="">No Group (Global)</option>
+                                                        {groups.map(g => (
+                                                            <option key={g.id} value={g.id}>{g.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
                                             </div>
                                         </div>
 
