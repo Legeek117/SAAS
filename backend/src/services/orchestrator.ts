@@ -18,17 +18,49 @@ let isOrchestratorRunning = false;
 export const executeGlobalCycle = async () => {
     console.log('🤖 Orchestrator: Starting global autonomous cycle...');
     try {
-        const accounts = await prisma.twitterAccount.findMany({
-            where: { autoMode: true, status: 'ACTIVE' }
+        const campaigns = await prisma.campaign.findMany({
+            where: { isActive: true }
         });
 
-        console.log(`🤖 Orchestrator: Found ${accounts.length} accounts in Auto-Mode.`);
+        console.log(`🤖 Orchestrator: Processing ${campaigns.length} active campaigns.`);
 
-        for (const account of accounts) {
-            if (account.type === 'MAIN') {
-                await handleMainAutomation(account);
-            } else if (account.type === 'SUPPORT') {
-                await handleSupportAutomation(account);
+        // Diagnostic: Check for groups that have autoMode accounts but no active campaign
+        const groupsWithAutoAccounts = await prisma.twitterAccount.findMany({
+            where: { autoMode: true },
+            select: { groupId: true },
+            distinct: ['groupId']
+        });
+
+        for (const { groupId } of groupsWithAutoAccounts) {
+            if (groupId && !campaigns.some(c => c.groupId === groupId)) {
+                console.warn(`⚠️ Orchestrator: Group ${groupId} has autoMode accounts but NO active campaign. They will stay idle.`);
+            }
+        }
+
+        for (const campaign of campaigns) {
+            // Find MAIN accounts for this campaign group
+            const mainAccounts = await prisma.twitterAccount.findMany({
+                where: { 
+                    groupId: campaign.groupId,
+                    type: 'MAIN',
+                    autoMode: true
+                }
+            });
+
+            for (const account of mainAccounts) {
+                await handleMainAutomation(account, campaign);
+            }
+
+            // Passive support automation for this group
+            const supportAccounts = await prisma.twitterAccount.findMany({
+                where: {
+                    groupId: campaign.groupId,
+                    type: 'SUPPORT',
+                    autoMode: true
+                }
+            });
+            for (const support of supportAccounts) {
+                await handleSupportAutomation(support);
             }
         }
     } catch (error) {
@@ -38,88 +70,169 @@ export const executeGlobalCycle = async () => {
 
 export const startOrchestrator = () => {
     if (isOrchestratorRunning) {
-        // If it's already running, just trigger an immediate cycle manually instead of duplicate crons
         executeGlobalCycle();
         return;
     }
-    
     isOrchestratorRunning = true;
-    
-    // Execute cycle immediately when initialized
     executeGlobalCycle();
-
-    // Then schedule to run every 15 minutes
     cron.schedule('*/15 * * * *', executeGlobalCycle);
-
     console.log('✅ Global Orchestrator initialized and listening.');
 };
 
-/**
- * Logic for MAIN accounts: Posting & Warm-up
- */
-async function handleMainAutomation(account: any) {
-    const roll = Math.random();
-
-    // 15% chance to post if there is content available
-    if (roll < 0.15) {
-        await triggerCampaignPost(account);
-    } 
-    // 25% chance to warm up
-    else if (roll < 0.40) {
-        console.log(`🛡️ Orchestrator: Scheduling Warm-Up for MAIN account ${account.username}`);
-        await twitterQueue.add(`auto-warmup-${account.username}-${Date.now()}`, {
-            accountId: account.id,
-            action: 'warmUp',
-            username: account.username
-        });
-    }
-}
-
-/**
- * Logic for SUPPORT accounts: Passive warm-up (Engaging with niche)
- * Active boosting is handled via job_completed events in index.ts
- */
-async function handleSupportAutomation(account: any) {
-    // 20% chance to do a random warm-up to keep the account healthy
-    if (Math.random() < 0.20) {
-        console.log(`🛡️ Orchestrator: Scheduling Warm-Up for SUPPORT account ${account.username}`);
-        await twitterQueue.add(`auto-warmup-support-${account.username}-${Date.now()}`, {
-            accountId: account.id,
-            action: 'warmUp',
-            username: account.username
-        });
-    }
-}
-
-/**
- * Randomly pick content from any active user campaign and post it
- */
-async function triggerCampaignPost(account: any) {
+async function handleMainAutomation(account: any, campaign: any) {
     try {
-        const campaigns = await prisma.campaign.findMany({
-            where: { 
-                userId: account.userId, 
-                isActive: true,
-                groupId: account.groupId // Match group
+        let settings = await prisma.globalSettings.findUnique({
+            where: { userId: account.userId }
+        });
+
+        // Fallback to default if not configured
+        if (!settings) {
+            settings = {
+                id: 'default',
+                userId: account.userId,
+                postIntervalValue: 30,
+                postIntervalUnit: 'MINUTES',
+                commentsPerPostLimit: 5,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            };
+        }
+
+        const lastPost = await prisma.twitterPost.findFirst({
+            where: { accountId: account.id, status: 'PUBLISHED' },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        let canPost = true;
+        if (lastPost) {
+            const now = new Date();
+            const lastPostTime = new Date(lastPost.createdAt);
+            const diffMs = now.getTime() - lastPostTime.getTime();
+            
+            const intervalMs = settings.postIntervalUnit === 'HOURS' 
+                ? settings.postIntervalValue * 60 * 60 * 1000 
+                : settings.postIntervalValue * 60 * 1000;
+
+            if (diffMs < intervalMs) {
+                canPost = false;
+            }
+        }
+
+        const roll = Math.random();
+
+        // 90% chance to post if interval passed for higher autonomy
+        if (canPost && roll < 0.90) {
+            await triggerCampaignPost(account, campaign);
+        } 
+        // 10% chance to join a community if enabled and not posting
+        else if (campaign.targetCommunities && campaign.targetCommunities.length > 0 && roll < 0.10) {
+            const communityUrl = campaign.targetCommunities[Math.floor(Math.random() * campaign.targetCommunities.length)];
+            console.log(`👥 Orchestrator: Scheduling Community Join for ${account.username} -> ${communityUrl}`);
+            await twitterQueue.add(`join-community-${account.username}-${Date.now()}`, {
+                accountId: account.id,
+                action: 'joinCommunity',
+                username: account.username,
+                config: { url: communityUrl }
+            });
+        }
+        // Warm up fallback
+        else if (roll < 0.20) {
+            await twitterQueue.add(`auto-warmup-${account.username}-${Date.now()}`, {
+                accountId: account.id,
+                action: 'warmUp',
+                username: account.username
+            });
+        }
+    } catch (error) {
+        console.error(`❌ Error in handleMainAutomation for ${account.username}:`, error);
+    }
+}
+
+async function handleSupportAutomation(account: any) {
+    try {
+        // Find the most recent post from any MAIN account in the same group
+        const latestMainPost = await prisma.twitterPost.findFirst({
+            where: {
+                account: {
+                    groupId: account.groupId,
+                    type: 'MAIN'
+                },
+                status: 'PUBLISHED',
+                postUrl: { not: null }
             },
+            orderBy: { publishedAt: 'desc' }
+        });
+
+        const roll = Math.random();
+
+        // 60% chance to react if a post exists
+        if (latestMainPost && latestMainPost.postUrl && roll < 0.60) {
+            const reactionRoll = Math.random();
+            const username = account.username;
+
+            if (reactionRoll < 0.40) {
+                console.log(`❤️ Orchestrator: Support ${username} -> Liking ${latestMainPost.postUrl}`);
+                await twitterQueue.add(`support-like-${username}-${Date.now()}`, {
+                    accountId: account.id,
+                    action: 'autoLike',
+                    username,
+                    config: { url: latestMainPost.postUrl }
+                });
+            } else if (reactionRoll < 0.70) {
+                console.log(`🔁 Orchestrator: Support ${username} -> Retweeting ${latestMainPost.postUrl}`);
+                await twitterQueue.add(`support-retweet-${username}-${Date.now()}`, {
+                    accountId: account.id,
+                    action: 'autoRetweet',
+                    username,
+                    config: { url: latestMainPost.postUrl }
+                });
+            } else {
+                console.log(`💬 Orchestrator: Support ${username} -> Commenting on ${latestMainPost.postUrl}`);
+                await twitterQueue.add(`support-comment-${username}-${Date.now()}`, {
+                    accountId: account.id,
+                    action: 'spamComments',
+                    username,
+                    config: { 
+                        url: latestMainPost.postUrl,
+                        count: 1 
+                    }
+                });
+            }
+        } 
+        // 15% chance for a random warmup if no reaction or roll failed
+        else if (roll < 0.15) {
+            await twitterQueue.add(`auto-warmup-support-${account.username}-${Date.now()}`, {
+                accountId: account.id,
+                action: 'warmUp',
+                username: account.username
+            });
+        }
+    } catch (error) {
+        console.error(`❌ Error in handleSupportAutomation for ${account.username}:`, error);
+    }
+}
+
+async function triggerCampaignPost(account: any, campaign: any) {
+    try {
+        const campaignWithContent = await prisma.campaign.findUnique({
+            where: { id: campaign.id },
             include: { contents: true }
         });
 
-        if (campaigns.length === 0) {
-            console.log(`⚠️ Orchestrator: No active campaigns for user ${account.userId}`);
+        if (!campaignWithContent || campaignWithContent.contents.length === 0) {
+            console.warn(`⚠️ Orchestrator: Campaign "${campaign.name}" (${campaign.id}) has NO content. Skipping.`);
             return;
         }
 
-        const allContents = campaigns.flatMap(c => c.contents);
-        if (allContents.length === 0) {
-            console.log(`⚠️ Orchestrator: Campaigns found but no content available.`);
-            return;
+        const content = campaignWithContent.contents[Math.floor(Math.random() * campaignWithContent.contents.length)];
+        
+        // Decide target community: content-specific first, then campaign-level random
+        let targetCommunity = content.targetCommunity;
+        if (!targetCommunity && campaign.targetCommunities && campaign.targetCommunities.length > 0 && Math.random() < 0.70) {
+            targetCommunity = campaign.targetCommunities[Math.floor(Math.random() * campaign.targetCommunities.length)];
         }
 
-        // Pick random content
-        const content = allContents[Math.floor(Math.random() * allContents.length)];
-
-        console.log(`🚀 Orchestrator: Triggering Campaign Post for ${account.username}`);
+        console.log(`🚀 Orchestrator: Triggering Post for ${account.username} (Campaign: ${campaign.name}${targetCommunity ? ' in community ' + targetCommunity : ''})`);
         
         await twitterQueue.add(`auto-post-${account.username}-${Date.now()}`, {
             accountId: account.id,
@@ -128,11 +241,11 @@ async function triggerCampaignPost(account: any) {
             config: {
                 content: content.caption,
                 mediaUrls: content.mediaUrls,
-                linkUrl: content.linkUrl
+                linkUrl: content.linkUrl,
+                communityUrl: targetCommunity
             }
         });
 
-        // Track usage
         await prisma.campaignContent.update({
             where: { id: content.id },
             data: { usedCount: { increment: 1 } }

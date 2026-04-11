@@ -38,8 +38,9 @@ export const authenticateToken = async (req: AuthRequest, res: Response, next: N
                      role: decoded.role || UserRole.ADMIN,
                      settings: {
                          create: {
-                             postsPerDayLimit: 3,
-                             commentsPerPostLimit: 5
+                            postIntervalValue: 30,
+                            postIntervalUnit: 'MINUTES',
+                            commentsPerPostLimit: 5,
                          }
                      }
                  }

@@ -672,41 +672,70 @@ async function dismissPopups(page: Page, emitLog: (msg: string) => void): Promis
 async function validateSession(page: Page, emitLog: (msg: string) => void): Promise<boolean> {
     try {
         emitLog("🔄 Vérification de la session existante...");
-        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await sleep(2000);
+        // Use domcontentloaded + shorter timeout for faster validation
+        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await sleep(3000);
 
-        // Check for "Something went wrong" / Retry button
-        const retryBtn = page.locator('span:has-text("Retry"), span:has-text("Réessayer"), [data-testid="empty_state_button_text"]').first();
-        if (await retryBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-            emitLog("⚠️ Twitter affiche une erreur 'Retry'. Tentative de relance...");
-            await retryBtn.click().catch(() => page.reload());
-            await sleep(5000);
-        }
-
-        // Check if we are on the login page (means cookies failed)
-        if (page.url().includes('/login')) {
-            emitLog("❌ Redirigé vers /login - Session invalide.");
+        // If still on login or redirected to login, cookies are dead
+        if (page.url().includes('/login') || page.url().includes('/i/flow/login')) {
+            emitLog("❌ Session invalide (Redirection vers login).");
             return false;
         }
 
-        // Check for successful authentication indicators
-        const authenticated = await Promise.race([
-            page.waitForSelector('[data-testid="SideNav_AccountSwitcher_Button"]', { timeout: 15000 }).then(() => true),
-            page.waitForSelector('nav[aria-label="Primary"], [data-testid="AppTabBar_Home_Link"]', { timeout: 15000 }).then(() => true),
-            page.waitForSelector('[data-testid="SideNav_NewTweet_Button"]', { timeout: 15000 }).then(() => true)
-        ]).catch(() => false);
+        // Quick check for authenticated layout without waiting for full network idle
+        const authenticated = await page.evaluate(() => {
+            return !!document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]') || 
+                   !!document.querySelector('nav[aria-label="Primary"]') ||
+                   !!document.querySelector('[data-testid="SideNav_NewTweet_Button"]');
+        });
 
         if (authenticated) {
-            emitLog("✅ Session valide - Accès direct accordé !");
+            emitLog("✅ Session valide!");
             return true;
         }
 
-        emitLog("⚠️ Échec de la vérification de session (timeout).");
-        return false;
+        emitLog("⚠️ Session incertaine (Layout non détecté). Tentative de rafraîchissement...");
+        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+        await sleep(3000);
+        
+        return await page.evaluate(() => {
+            return !!document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]') || 
+                   !!document.querySelector('nav[aria-label="Primary"]');
+        });
     } catch (error: any) {
-        emitLog(`⚠️ Erreur lors de la vérification de session : ${error.message}`);
+        emitLog(`⚠️ Erreur de validation: ${error.message}`);
         return false;
     }
+}
+
+/**
+ * Executes a function with automatic retry and healing
+ */
+async function retryAction(page: Page, emitLog: (msg: string) => void, actionFn: () => Promise<void>, maxRetries = 2) {
+    let lastError: any;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            await actionFn();
+            return; // Success!
+        } catch (error: any) {
+            lastError = error;
+            emitLog(`⚠️ Échec (tentative ${i + 1}/${maxRetries}): ${error.message}`);
+            
+            if (i < maxRetries - 1) {
+                emitLog("🔄 Tentative de guérison de la session...");
+                await page.reload({ waitUntil: 'networkidle' }).catch(() => {});
+                await sleep(5000);
+                
+                // Re-validate session
+                const isStillOk = await validateSession(page, emitLog);
+                if (!isStillOk) {
+                    emitLog("❌ Session perdue pendant l'action. Arrêt.");
+                    throw new Error("Session lost during action");
+                }
+            }
+        }
+    }
+    throw lastError;
 }
 
 // ─── Warm Up ──────────────────────────────────────────────────────────────────
@@ -1335,17 +1364,21 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
             }
         }
         
-        // Strategy 3: Navigate directly to compose page
+        // Strategy 3: Navigate directly to compose page (or community compose)
         if (!composed) {
             try {
-                emitLog("🌐 Navigating to compose page...");
-                await page.goto('https://x.com/compose/post', { waitUntil: 'networkidle', timeout: 15000 });
-                await sleep(2000);
+                const composeUrl = config?.communityUrl 
+                    ? `${config.communityUrl.replace(/\/$/, '')}/compose` 
+                    : 'https://x.com/compose/post';
+                
+                emitLog(`🌐 Navigating to ${config?.communityUrl ? 'community ' : ''}compose page...`);
+                await page.goto(composeUrl, { waitUntil: 'networkidle', timeout: 15000 });
+                await sleep(3000);
                 
                 const textArea = page.locator('[data-testid="tweetTextarea_0"]').first();
-                if (await textArea.isVisible({ timeout: 3000 }).catch(() => false)) {
+                if (await textArea.isVisible({ timeout: 5000 }).catch(() => false)) {
                     composed = true;
-                    emitLog("✅ Direct compose page loaded");
+                    emitLog("✅ Compose page loaded");
                 }
             } catch (e) {
                 emitLog("⚠️ Direct navigation failed");
@@ -1431,6 +1464,27 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
                 if (href) {
                     const postUrl = `https://x.com${href}`;
                     emitLog(`🔗 Post URL found: ${postUrl}`);
+                    
+                    // NEW: Save to database so spammers can react!
+                    try {
+                        const account = await prisma.twitterAccount.findUnique({ where: { username } });
+                        if (account) {
+                            await prisma.twitterPost.create({
+                                data: {
+                                    accountId: account.id,
+                                    content: tweetContent,
+                                    postUrl: postUrl,
+                                    status: 'PUBLISHED',
+                                    publishedAt: new Date(),
+                                    scheduleDate: new Date(), // Immediate post
+                                },
+                            });
+                            emitLog("✅ Post enregistré en base de données pour orchestration.");
+                        }
+                    } catch (dbErr: any) {
+                        emitLog(`⚠️ Erreur enregistrement post: ${dbErr.message}`);
+                    }
+
                     return { success: true, postUrl };
                 }
             }
@@ -1449,6 +1503,27 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
                 if (href) {
                     const postUrl = `https://x.com${href}`;
                     emitLog(`🔗 Post URL found (shortcut): ${postUrl}`);
+
+                    // NEW: Save to database
+                    try {
+                        const account = await prisma.twitterAccount.findUnique({ where: { username } });
+                        if (account) {
+                            await prisma.twitterPost.create({
+                                data: {
+                                    accountId: account.id,
+                                    content: tweetContent,
+                                    postUrl: postUrl,
+                                    status: 'PUBLISHED',
+                                    publishedAt: new Date(),
+                                    scheduleDate: new Date(),
+                                },
+                            });
+                            emitLog("✅ Post enregistré en base de données (shortcut).");
+                        }
+                    } catch (dbErr: any) {
+                        emitLog(`⚠️ Erreur enregistrement post (shortcut): ${dbErr.message}`);
+                    }
+
                     return { success: true, postUrl };
                 }
             }
@@ -1572,6 +1647,13 @@ async function doScheduledPost(page: Page, emitLog: (msg: string) => void, postI
                 if (href) {
                     const postUrl = `https://x.com${href}`;
                     emitLog(`🔗 Post URL found: ${postUrl}`);
+                    
+                    // Update the existing scheduled post record
+                    await prisma.twitterPost.update({
+                        where: { id: postId },
+                        data: { postUrl: postUrl }
+                    }).catch(() => {});
+
                     return { success: true, postUrl };
                 }
             }
@@ -1641,7 +1723,24 @@ async function doSetupProfile(page: Page, emitLog: (msg: string) => void, config
 // ─── Join Community ───────────────────────────────────────────────────────────
 
 async function doJoinCommunity(page: Page, emitLog: (msg: string) => void, config?: any) {
-    // ONLY search for OnlyFans communities
+    if (config?.url) {
+        emitLog(`👥 Join Community : Direct join via URL: ${config.url}`);
+        await page.goto(config.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await sleep(randomRange(3000, 5000));
+        
+        // Look for Join button
+        const joinBtn = page.locator('button:has-text("Join"), button:has-text("Rejoindre")').first();
+        if (await joinBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+            await humanClick(page, joinBtn);
+            emitLog("✅ Community join button clicked.");
+            await sleep(2000);
+        } else {
+            emitLog("ℹ️ Join button not visible. Already a member?");
+        }
+        return;
+    }
+
+    // Fallback to keyword search
     const onlyfansKeywords = [
         'onlyfans',
         'onlyfans creator',
@@ -1657,11 +1756,11 @@ async function doJoinCommunity(page: Page, emitLog: (msg: string) => void, confi
     const keyword = config?.keyword || onlyfansKeywords[randomRange(0, onlyfansKeywords.length - 1)];
     emitLog(`👥 Join Community : Searching OnlyFans communities for "${keyword}"...`);
 
-    await page.goto('https://x.com/explore', { waitUntil: 'domcontentloaded' });
-    await sleep(randomRange(3000, 5000));
-
-    const searchInput = 'input[data-testid="SearchBox_Search_Input"]';
     try {
+        await page.goto('https://x.com/explore', { waitUntil: 'domcontentloaded' });
+        await sleep(randomRange(3000, 5000));
+
+        const searchInput = 'input[data-testid="SearchBox_Search_Input"]';
         await page.waitForSelector(searchInput, { state: 'visible', timeout: 10000 });
         await humanType(page, searchInput, keyword);
         await sleep(randomRange(1000, 2000));
@@ -1683,12 +1782,11 @@ async function doJoinCommunity(page: Page, emitLog: (msg: string) => void, confi
                 await sleep(randomRange(1500, 3500));
                 await humanClick(page, likeBtns[i]);
                 liked++;
-                emitLog(`❤️ Liked post #${liked}`);
             }
         }
-        emitLog(`✅ Join Community terminé : ${liked} interactions.`);
-    } catch {
-        emitLog("❌ Erreur lors de l'interaction avec Explore.");
+        emitLog(`✅ Search & Interaction Warm-up complete (${liked} likes).`);
+    } catch (err: any) {
+        emitLog(`⚠️ Search error: ${err.message}`);
     }
 }
 
@@ -1902,10 +2000,21 @@ export const twitterWorkerHandler = async (job: any) => {
         throw error;
     } finally {
         clearInterval(screenshotInterval);
-        // Send one last small black placeholder to 'clear' the frontend screencast
-        socket.emit('worker_screenshot', { username, image: null }); 
-        await browser?.close();
-        socket.emit('worker_state', { username, state: 'IDLE' });
-        await prisma.twitterAccount.update({ where: { id: accountId }, data: { status: 'ACTIVE' } });
+        
+        // REFRESH DB State one last time
+        const finalAcc = await prisma.twitterAccount.findUnique({ where: { id: accountId } });
+        const autoMode = finalAcc?.autoMode || false;
+
+        if (autoMode) {
+            emitLog("🔄 Auto-Mode actif : Maintien de la session ouverte...");
+            // We don't close the browser. This allows the user to see the screencast
+            socket.emit('worker_state', { username, state: 'ACTIVE' });
+        } else {
+            emitLog("⏹️ Fin de session : Fermeture du navigateur.");
+            socket.emit('worker_screenshot', { username, image: null }); 
+            await browser?.close();
+            socket.emit('worker_state', { username, state: 'IDLE' });
+            await prisma.twitterAccount.update({ where: { id: accountId }, data: { status: 'ACTIVE' } });
+        }
     }
 };

@@ -15,9 +15,9 @@ import { authenticateToken, isAdmin, AuthRequest } from './middleware/auth';
 import { upload } from './middleware/upload';
 import { startOrchestrator } from './services/orchestrator';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ghost-content-secret-key-2024';
-
 dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'ghost-content-secret-key-2024';
 
 const app = express();
 const prisma = new PrismaClient();
@@ -143,7 +143,8 @@ app.get('/api/settings', authenticateToken, async (req: AuthRequest, res) => {
             settings = await prisma.globalSettings.create({
                 data: {
                     userId,
-                    postsPerDayLimit: 3,
+                    postIntervalValue: 30,
+                    postIntervalUnit: 'MINUTES',
                     commentsPerPostLimit: 5
                 }
             });
@@ -159,20 +160,22 @@ app.get('/api/settings', authenticateToken, async (req: AuthRequest, res) => {
  */
 app.post('/api/settings', authenticateToken, async (req: AuthRequest, res) => {
     const userId = req.user?.id || 'temp-user-id';
-    const { postsPerDayLimit, commentsPerPostLimit, followPerDayLimit, autoSyncMetadata } = req.body;
+    const { postIntervalValue, postIntervalUnit, commentsPerPostLimit, followPerDayLimit, autoSyncMetadata } = req.body;
 
     try {
         const settings = await prisma.globalSettings.upsert({
             where: { userId },
             update: {
-                ...(postsPerDayLimit !== undefined && { postsPerDayLimit }),
+                ...(postIntervalValue !== undefined && { postIntervalValue }),
+                ...(postIntervalUnit !== undefined && { postIntervalUnit }),
                 ...(commentsPerPostLimit !== undefined && { commentsPerPostLimit }),
                 ...(followPerDayLimit !== undefined && { followPerDayLimit }),
                 ...(autoSyncMetadata !== undefined && { autoSyncMetadata })
             },
             create: {
                 userId,
-                postsPerDayLimit: postsPerDayLimit || 3,
+                postIntervalValue: postIntervalValue || 30,
+                postIntervalUnit: postIntervalUnit || 'MINUTES',
                 commentsPerPostLimit: commentsPerPostLimit || 5,
                 followPerDayLimit: followPerDayLimit || 20,
                 autoSyncMetadata: autoSyncMetadata !== undefined ? autoSyncMetadata : true
@@ -347,7 +350,9 @@ app.post('/api/accounts/:id/action', authenticateToken, async (req: AuthRequest,
  * Get all Twitter accounts
  */
 app.get('/api/twitter-accounts', authenticateToken, async (req: AuthRequest, res) => {
+    const userId = req.user?.id || 'temp-user-id';
     const accounts = await prisma.twitterAccount.findMany({
+        where: { userId },
         include: { proxy: true }
     });
     res.json(accounts);
@@ -532,16 +537,26 @@ app.patch('/api/twitter-accounts/:id/profile', authenticateToken, async (req: Au
 app.delete('/api/twitter-accounts/:id', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
     try {
-        // First delete the proxy if it exists
-        const proxy = await prisma.twitterProxy.findUnique({ where: { accountId: id } });
-        if (proxy) {
-            await prisma.twitterProxy.delete({ where: { accountId: id } });
-        }
+        console.log(`🗑️ Backend: Attempting to delete Twitter account ${id}...`);
         
-        // Then delete the account
-        await prisma.twitterAccount.delete({ where: { id } });
-        res.json({ success: true, message: "Compte Twitter supprimé." });
+        await prisma.$transaction(async (tx) => {
+            // Delete all related records first (Cascading manual cleanup)
+            await tx.activityLog.deleteMany({ where: { accountId: id } });
+            await tx.banAlert.deleteMany({ where: { accountId: id } });
+            await tx.twitterPost.deleteMany({ where: { accountId: id } });
+            await tx.twitterStats.deleteMany({ where: { accountId: id } });
+            
+            // Delete the proxy if it exists
+            await tx.twitterProxy.deleteMany({ where: { accountId: id } });
+            
+            // Finally delete the account
+            await tx.twitterAccount.delete({ where: { id } });
+        });
+
+        console.log(`✅ Backend: Account ${id} and all related data deleted.`);
+        res.json({ success: true, message: "Compte Twitter supprimé avec succès." });
     } catch (error: any) {
+        console.error(`❌ Backend: Delete Failed for ${id}:`, error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -689,9 +704,11 @@ app.patch('/api/twitter-posts/:postId/stats', async (req, res) => {
 /**
  * Get all account groups
  */
-app.get('/api/groups', async (req, res) => {
+app.get('/api/groups', authenticateToken, async (req: AuthRequest, res) => {
+    const userId = req.user?.id || 'temp-user-id';
     try {
         const groups = await prisma.accountGroup.findMany({
+            where: { userId },
             include: { accounts: true },
             orderBy: { createdAt: 'desc' }
         });
@@ -704,8 +721,11 @@ app.get('/api/groups', async (req, res) => {
 /**
  * Create a new account group
  */
-app.post('/api/groups', async (req, res) => {
+app.post('/api/groups', authenticateToken, async (req: AuthRequest, res) => {
     const { name, description, taskType, schedule, accountIds } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) return res.status(401).json({ error: 'Non authentifié' });
 
     try {
         const group = await prisma.accountGroup.create({
@@ -714,7 +734,7 @@ app.post('/api/groups', async (req, res) => {
                 description,
                 taskType,
                 schedule,
-                userId: 'temp-user-id',
+                userId,
                 ...(accountIds && {
                     accounts: {
                         connect: accountIds.map((id: string) => ({ id }))
@@ -732,11 +752,18 @@ app.post('/api/groups', async (req, res) => {
 /**
  * Update group
  */
-app.patch('/api/groups/:id', async (req, res) => {
+app.patch('/api/groups/:id', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
     const { name, description, taskType, schedule, isActive, accountIds } = req.body;
+    const userId = req.user?.id;
 
     try {
+        // Verify ownership
+        const existingGroup = await prisma.accountGroup.findFirst({
+            where: { id, userId }
+        });
+        if (!existingGroup) return res.status(404).json({ error: 'Group not found or unauthorized' });
+
         const group = await prisma.accountGroup.update({
             where: { id },
             data: {
@@ -762,23 +789,30 @@ app.patch('/api/groups/:id', async (req, res) => {
 /**
  * Update account group assignment
  */
-app.patch('/api/twitter-accounts/:id/group', async (req, res) => {
+app.patch('/api/twitter-accounts/:id/group', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
     const { groupId } = req.body;
+    const userId = req.user?.id;
 
     if (!groupId) {
         return res.status(400).json({ error: 'groupId is required' });
     }
 
     try {
-        // Verify group exists
-        const group = await prisma.accountGroup.findUnique({
-            where: { id: groupId }
+        // Verify group exists and belongs to user
+        const group = await prisma.accountGroup.findFirst({
+            where: { id: groupId, userId }
         });
 
         if (!group) {
-            return res.status(404).json({ error: 'Group not found' });
+            return res.status(404).json({ error: 'Group not found or unauthorized' });
         }
+
+        // Verify account belongs to user
+        const existingAccount = await prisma.twitterAccount.findFirst({
+            where: { id, userId }
+        });
+        if (!existingAccount) return res.status(404).json({ error: 'Account not found or unauthorized' });
 
         // Update account's group
         const account = await prisma.twitterAccount.update({
@@ -802,10 +836,17 @@ app.patch('/api/twitter-accounts/:id/group', async (req, res) => {
 /**
  * Delete group
  */
-app.delete('/api/groups/:id', async (req, res) => {
+app.delete('/api/groups/:id', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
+    const userId = req.user?.id;
 
     try {
+        // Verify ownership
+        const existingGroup = await prisma.accountGroup.findFirst({
+            where: { id, userId }
+        });
+        if (!existingGroup) return res.status(404).json({ error: 'Group not found or unauthorized' });
+
         await prisma.accountGroup.delete({ where: { id } });
         res.json({ success: true });
     } catch (error: any) {
@@ -818,9 +859,11 @@ app.delete('/api/groups/:id', async (req, res) => {
 /**
  * Get all content templates
  */
-app.get('/api/templates', async (req, res) => {
+app.get('/api/templates', authenticateToken, async (req: AuthRequest, res) => {
+    const userId = req.user?.id || 'temp-user-id';
     try {
         const templates = await prisma.contentTemplate.findMany({
+            where: { userId },
             orderBy: { createdAt: 'desc' }
         });
         res.json(templates);
@@ -832,8 +875,11 @@ app.get('/api/templates', async (req, res) => {
 /**
  * Create content template
  */
-app.post('/api/templates', async (req, res) => {
+app.post('/api/templates', authenticateToken, async (req: AuthRequest, res) => {
     const { name, content, type, mediaUrls, spinTax, hashtags } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) return res.status(401).json({ error: 'Non authentifié' });
 
     try {
         const template = await prisma.contentTemplate.create({
@@ -844,7 +890,7 @@ app.post('/api/templates', async (req, res) => {
                 mediaUrls: mediaUrls || [],
                 spinTax,
                 hashtags: hashtags || [],
-                userId: 'temp-user-id'
+                userId
             }
         });
         res.status(201).json(template);
@@ -856,10 +902,17 @@ app.post('/api/templates', async (req, res) => {
 /**
  * Delete template
  */
-app.delete('/api/templates/:id', async (req, res) => {
+app.delete('/api/templates/:id', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
+    const userId = req.user?.id;
 
     try {
+        // Verify ownership
+        const existingTemplate = await prisma.contentTemplate.findFirst({
+            where: { id, userId }
+        });
+        if (!existingTemplate) return res.status(404).json({ error: 'Template not found or unauthorized' });
+
         await prisma.contentTemplate.delete({ where: { id } });
         res.json({ success: true });
     } catch (error: any) {
@@ -867,12 +920,8 @@ app.delete('/api/templates/:id', async (req, res) => {
     }
 });
 
-// --- ACTIVITY HISTORY API ---
-
-/**
- * Get activity history
- */
-app.get('/api/activities', async (req, res) => {
+app.get('/api/activities', authenticateToken, async (req: AuthRequest, res) => {
+    const userId = req.user?.id || 'temp-user-id';
     const { accountId, action, status, limit = 100 } = req.query;
 
     try {
@@ -880,7 +929,8 @@ app.get('/api/activities', async (req, res) => {
             where: {
                 ...(accountId && { accountId: accountId as string }),
                 ...(action && { action: action as string }),
-                ...(status && { status: status as string })
+                ...(status && { status: status as string }),
+                account: { userId } // Filter by user id
             },
             orderBy: { timestamp: 'desc' },
             take: Number(limit)
@@ -955,7 +1005,7 @@ app.post('/api/comment-requests', async (req, res) => {
                 postUrl,
                 totalComments,
                 assignedAccounts,
-                userId: 'temp-user-id'
+                userId: (req as AuthRequest).user?.id || 'temp-user-id'
             }
         });
         res.status(201).json(request);
@@ -967,9 +1017,11 @@ app.post('/api/comment-requests', async (req, res) => {
 /**
  * Get comment requests
  */
-app.get('/api/comment-requests', async (req, res) => {
+app.get('/api/comment-requests', authenticateToken, async (req: AuthRequest, res) => {
+    const userId = req.user?.id || 'temp-user-id';
     try {
         const requests = await prisma.commentRequest.findMany({
+            where: { userId },
             orderBy: { createdAt: 'desc' }
         });
         res.json(requests);
@@ -1052,16 +1104,15 @@ app.post('/api/upload', upload.single('image'), async (req: any, res) => {
 
 // --- BAN DETECTION & NOTIFICATIONS API ---
 
-/**
- * Get ban alerts
- */
-app.get('/api/ban-alerts', async (req, res) => {
+app.get('/api/ban-alerts', authenticateToken, async (req: AuthRequest, res) => {
+    const userId = req.user?.id || 'temp-user-id';
     const { accountId } = req.query;
 
     try {
         const alerts = await prisma.banAlert.findMany({
             where: {
-                ...(accountId && { accountId: accountId as string })
+                ...(accountId && { accountId: accountId as string }),
+                account: { userId }
             },
             include: { account: true },
             orderBy: { createdAt: 'desc' }
@@ -1091,7 +1142,7 @@ app.post('/api/ban-alerts', async (req, res) => {
         // Also create a notification
         await prisma.notification.create({
             data: {
-                userId: 'temp-user-id',
+                userId: (req as any).user?.id || 'temp-user-id',
                 type: 'BAN',
                 title: `Compte banni: ${alert.account.username}`,
                 message: message
@@ -1109,10 +1160,11 @@ app.post('/api/ban-alerts', async (req, res) => {
 /**
  * Get all campaigns
  */
-app.get('/api/campaigns', async (req, res) => {
+app.get('/api/campaigns', authenticateToken, async (req: AuthRequest, res) => {
+    const userId = req.user?.id || 'temp-user-id';
     try {
         const campaigns = await prisma.campaign.findMany({
-            where: { userId: 'temp-user-id' }, // Placeholder for auth.userId
+            where: { userId },
             include: { contents: true },
             orderBy: { createdAt: 'desc' }
         });
@@ -1178,7 +1230,11 @@ app.patch('/api/campaigns/:id', authenticateToken, async (req: AuthRequest, res)
  */
 app.post('/api/orchestrator/toggle-all', authenticateToken, async (req: AuthRequest, res) => {
     const { autoMode } = req.body;
-    const userId = req.user?.id || 'temp-user-id';
+    const userId = req.user?.id;
+    
+    if (!userId) {
+         return res.status(401).json({ error: "Utilisateur non identifié" });
+    }
 
     try {
         await prisma.twitterAccount.updateMany({
@@ -1215,7 +1271,7 @@ app.post('/api/twitter-accounts/:id/sync', authenticateToken, async (req: AuthRe
  */
 app.post('/api/campaigns/:id/content', upload.array('mediaFiles'), async (req: any, res) => {
     const { id } = req.params;
-    const { caption, linkUrl } = req.body;
+    const { caption, linkUrl, targetCommunity } = req.body;
     
     try {
         const mediaUrls = req.files ? req.files.map((f: any) => `http://localhost:${port}/uploads/${f.filename}`) : [];
@@ -1225,6 +1281,7 @@ app.post('/api/campaigns/:id/content', upload.array('mediaFiles'), async (req: a
                 campaignId: id,
                 caption,
                 linkUrl,
+                targetCommunity,
                 mediaUrls
             }
         });
@@ -1506,21 +1563,34 @@ io.on('connection', (socket) => {
 });
 
 async function init() {
-    await prisma.user.upsert({
-        where: { id: 'temp-user-id' },
-        update: {},
-        create: {
-            id: 'temp-user-id',
-            email: 'admin@duupflow.com',
-            password: 'password'
-        }
-    });
-    
-    httpServer.listen(port, () => {
-        console.log(`🚀 Server ready at http://localhost:${port}`);
-        // Start the Ghost Mastermind Orchestrator
-        startOrchestrator();
-    });
+    try {
+        await prisma.user.upsert({
+            where: { id: 'temp-user-id' },
+            update: {},
+            create: {
+                id: 'temp-user-id',
+                email: 'admin@duupflow.com',
+                password: 'password'
+            }
+        });
+        
+        httpServer.listen(Number(port), '0.0.0.0', () => {
+            console.log(`🚀 Ghost Content Backend running on http://0.0.0.0:${port}`);
+            // Start the Ghost Mastermind Orchestrator
+            startOrchestrator();
+        });
+
+        // Global Error Handlers to prevent silent crashes
+        process.on('uncaughtException', (error) => {
+            console.error('🔥 FATAL: Uncaught Exception:', error);
+        });
+
+        process.on('unhandledRejection', (reason, promise) => {
+            console.error('🔥 FATAL: Unhandled Rejection at:', promise, 'reason:', reason);
+        });
+    } catch (e) {
+        console.error("🔥 Server failed to start:", e);
+    }
 }
 
 init().catch(console.error);

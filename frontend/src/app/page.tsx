@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import { io } from 'socket.io-client';
@@ -142,10 +142,11 @@ export default function Dashboard() {
     const [logs, setLogs] = useState<{ username: string, message: string, timestamp?: Date }[]>([]);
     const [screenshots, setScreenshots] = useState<Record<string, string>>({});
     const [activeAccount, setActiveAccount] = useState('');
-    const [viewMode, setViewMode] = useState<'SINGLE' | 'GRID' | 'PROXIES' | 'ACCOUNTS' | 'POSTS' | 'STATS' | 'ORCHESTRATION' | 'CAMPAIGNS' | 'SETTINGS'>('SINGLE');
-    const API_BASE = 'http://localhost:4000/api';
+    const [viewMode, setViewMode] = useState<'SINGLE' | 'GRID' | 'PROXIES' | 'ACCOUNTS' | 'POSTS' | 'STATS' | 'ORCHESTRATION' | 'CAMPAIGNS' | 'SETTINGS' | 'GROUPS'>('SINGLE');
+    const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000') + '/api';
     const [globalSettings, setGlobalSettings] = useState({
-        postsPerDayLimit: 3,
+        postIntervalValue: 30,
+        postIntervalUnit: 'MINUTES' as 'MINUTES' | 'HOURS',
         commentsPerPostLimit: 10,
         autoSyncMetadata: true
     });
@@ -183,10 +184,15 @@ export default function Dashboard() {
     const [isCreatingCampaign, setIsCreatingCampaign] = useState(false);
     const [newCampaignName, setNewCampaignName] = useState('');
     const [newCampaignDesc, setNewCampaignDesc] = useState('');
+    const [newCampaignCommunities, setNewCampaignCommunities] = useState('');
+    const [newCampaignPostsPerAcc, setNewCampaignPostsPerAcc] = useState(3);
+    const [newCampaignCommentsPerPost, setNewCampaignCommentsPerPost] = useState(5);
+    const [newCampaignGroupId, setNewCampaignGroupId] = useState('');
     const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
     const [newGroupName, setNewGroupName] = useState('');
     const [caption, setCaption] = useState('');
     const [linkUrl, setLinkUrl] = useState('');
+    const [targetCommunity, setTargetCommunity] = useState('');
     const [mediaFiles, setMediaFiles] = useState<FileList | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const [isMasterAutoOn, setIsMasterAutoOn] = useState(false);
@@ -265,8 +271,12 @@ export default function Dashboard() {
     }, [viewMode]);
 
     const fetchCampaigns = async () => {
+        const storedToken = localStorage.getItem('ghost_token');
+        if (!storedToken) return;
         try {
-            const res = await axios.get(`${API_BASE}/campaigns`);
+            const res = await axios.get(`${API_BASE}/campaigns`, {
+                headers: { 'Authorization': `Bearer ${storedToken}` }
+            });
             setCampaigns(res.data);
         } catch (err) {
             console.error('Failed to fetch campaigns', err);
@@ -274,19 +284,38 @@ export default function Dashboard() {
     };
 
     const createCampaign = async () => {
-        if (!newCampaignName) return;
+        if (!newCampaignName) {
+            alert("Veuillez entrer un nom de campagne.");
+            return;
+        }
         try {
+            console.log("🚀 Creating campaign with:", {
+                name: newCampaignName,
+                groupId: newCampaignGroupId
+            });
+            
             await axios.post(`${API_BASE}/campaigns`, {
                 name: newCampaignName,
                 description: newCampaignDesc,
-                groupId: newAcc.groupId // Using same state for convenience or adding a specific one
+                groupId: newCampaignGroupId || null,
+                targetCommunities: newCampaignCommunities.split('\n').filter(l => l.trim()),
+                postsPerAccount: newCampaignPostsPerAcc.toString(),
+                commentsPerPost: newCampaignCommentsPerPost.toString()
+            }, {
+                headers: { 'Authorization': `Bearer ${token}` }
             });
+            
+            alert("✅ Campagne créée avec succès !");
             setNewCampaignName('');
             setNewCampaignDesc('');
+            setNewCampaignCommunities('');
+            setNewCampaignPostsPerAcc(3);
+            setNewCampaignCommentsPerPost(5);
             setIsCreatingCampaign(false);
             fetchCampaigns();
-        } catch (err) {
+        } catch (err: any) {
             console.error('Create error', err);
+            alert(`❌ Erreur lors de la création: ${err.response?.data?.error || err.message}`);
         }
     };
 
@@ -298,6 +327,7 @@ export default function Dashboard() {
         const formData = new FormData();
         formData.append('caption', caption);
         formData.append('linkUrl', linkUrl);
+        if (targetCommunity) formData.append('targetCommunity', targetCommunity);
         if (mediaFiles) {
             for (let i = 0; i < mediaFiles.length; i++) {
                 formData.append('mediaFiles', mediaFiles[i]);
@@ -306,10 +336,14 @@ export default function Dashboard() {
 
         try {
             await axios.post(`${API_BASE}/campaigns/${selectedCampaign.id}/content`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: { 
+                    'Content-Type': 'multipart/form-data',
+                    'Authorization': `Bearer ${token}`
+                }
             });
             setCaption('');
             setLinkUrl('');
+            setTargetCommunity('');
             setMediaFiles(null);
             fetchCampaigns();
         } catch (err) {
@@ -356,11 +390,10 @@ export default function Dashboard() {
     const fetchPosts = async (accountId: string) => {
         if (!token) return;
         try {
-            const res = await fetch(`http://localhost:4000/api/twitter-posts/${accountId}`, {
+            const res = await axios.get(`${API_BASE}/twitter-posts/${accountId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            const data = await res.json();
-            setPosts(data);
+            setPosts(res.data);
         } catch (err) {
             console.error('Failed to fetch posts:', err);
         }
@@ -375,16 +408,14 @@ export default function Dashboard() {
                 if (account) {
                     actualAccountId = account.id;
                 } else {
-                    console.error('Account not found:', accountId);
                     return;
                 }
             }
             
-            const res = await fetch(`http://localhost:4000/api/twitter-stats/${actualAccountId}?days=${days}`, {
+            const res = await axios.get(`${API_BASE}/twitter-stats/${actualAccountId}?days=${days}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            const data = await res.json();
-            setStats(data);
+            setStats(res.data);
         } catch (err) {
             console.error('Failed to fetch stats:', err);
         }
@@ -402,25 +433,18 @@ export default function Dashboard() {
             : undefined;
 
         try {
-            const res = await fetch('http://localhost:4000/api/twitter-posts', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    accountId: account.id,
-                    content: newPost.content,
-                    scheduleDate
-                })
+            await axios.post(`${API_BASE}/twitter-posts`, {
+                accountId: account.id,
+                content: newPost.content,
+                scheduleDate
+            }, {
+                headers: { 'Authorization': `Bearer ${token}` }
             });
 
-            if (res.ok) {
-                setNewPost({ content: '', scheduleDate: '', scheduleTime: '' });
-                setShowPostModal(false);
-                fetchPosts(account.id);
-                alert('✅ Post créé avec succès!');
-            }
+            setNewPost({ content: '', scheduleDate: '', scheduleTime: '' });
+            setShowPostModal(false);
+            fetchPosts(account.id);
+            alert('✅ Post créé avec succès!');
         } catch (err) {
             alert('❌ Erreur lors de la création du post');
         }
@@ -431,7 +455,7 @@ export default function Dashboard() {
         if (!storedToken) return;
         
         try {
-            const url = p === 'TWITTER' ? 'http://localhost:4000/api/twitter-accounts' : 'http://localhost:4000/api/accounts';
+            const url = p === 'TWITTER' ? `${API_BASE}/twitter-accounts` : `${API_BASE}/accounts`;
             const res = await fetch(url, {
                 headers: { 'Authorization': `Bearer ${storedToken}` }
             });
@@ -467,7 +491,7 @@ export default function Dashboard() {
 
     const handleAddAccount = async (e: React.FormEvent) => {
         e.preventDefault();
-        const url = platform === 'TWITTER' ? 'http://localhost:4000/api/twitter-accounts' : 'http://localhost:4000/api/accounts';
+        const url = platform === 'TWITTER' ? `${API_BASE}/twitter-accounts` : `${API_BASE}/accounts`;
         try {
             let cookiesArray = undefined;
             if (platform === 'TWITTER') {
@@ -564,6 +588,7 @@ export default function Dashboard() {
             groupId: acc.groupId || ''
         });
         setTwitterCookies('');
+        setTwitterCt0('');
         setShowEditModal(true);
     };
 
@@ -572,25 +597,40 @@ export default function Dashboard() {
         if (!editingAccount || !token) return;
 
         const url = platform === 'TWITTER' 
-            ? `http://localhost:4000/api/twitter-accounts/${editingAccount.id}` 
-            : `http://localhost:4000/api/accounts/${editingAccount.id}`;
+            ? `${API_BASE}/twitter-accounts/${editingAccount.id}` 
+            : `${API_BASE}/accounts/${editingAccount.id}`;
             
         try {
             let cookiesArray = undefined;
-            if (platform === 'TWITTER' && twitterCookies.trim()) {
+            if (platform === 'TWITTER' && (twitterCookies.trim() || twitterCt0.trim())) {
                 const cookieInput = twitterCookies.trim();
                 if (cookieInput.startsWith('[') && cookieInput.endsWith(']')) {
                     cookiesArray = JSON.parse(cookieInput);
-                } else {
-                    cookiesArray = [{
-                        name: 'auth_token',
-                        value: cookieInput,
-                        domain: '.x.com',
-                        path: '/',
-                        secure: true,
-                        httpOnly: true,
-                        sameSite: 'Lax'
-                    }];
+                } else if (cookieInput || twitterCt0.trim()) {
+                    cookiesArray = [];
+                    if (cookieInput) {
+                        cookiesArray.push({
+                            name: 'auth_token',
+                            value: cookieInput,
+                            domain: '.x.com',
+                            path: '/',
+                            secure: true,
+                            httpOnly: true,
+                            sameSite: 'Lax'
+                        });
+                    }
+
+                    if (twitterCt0.trim()) {
+                        cookiesArray.push({
+                            name: 'ct0',
+                            value: twitterCt0.trim(),
+                            domain: '.x.com',
+                            path: '/',
+                            secure: true,
+                            httpOnly: false,
+                            sameSite: 'Lax'
+                        });
+                    }
                 }
             }
 
@@ -628,7 +668,7 @@ export default function Dashboard() {
     };
 
     const launchAction = async (id: string, action: string, autoSequence: boolean = false) => {
-        const url = platform === 'TWITTER' ? `http://localhost:4000/api/twitter-accounts/${id}/action` : `http://localhost:4000/api/accounts/${id}/action`;
+        const url = platform === 'TWITTER' ? `${API_BASE}/twitter-accounts/${id}/action` : `${API_BASE}/accounts/${id}/action`;
         const response = await fetch(url, {
             method: 'POST',
             headers: { 
@@ -743,7 +783,10 @@ export default function Dashboard() {
 
     const toggleAutoMode = async (accountId: string, currentStatus: boolean) => {
         try {
-            const res = await axios.patch(`${API_BASE}/twitter-accounts/${accountId}/auto-mode`, { autoMode: !currentStatus });
+            const res = await axios.patch(`${API_BASE}/twitter-accounts/${accountId}/auto-mode`, 
+                { autoMode: !currentStatus },
+                { headers: { 'Authorization': `Bearer ${token}` } }
+            );
             setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, autoMode: res.data.autoMode } : a));
         } catch (err) {
             console.error('Failed to toggle auto-mode', err);
@@ -975,7 +1018,7 @@ export default function Dashboard() {
                     {viewMode === 'SINGLE' && (
                         <div className="max-w-[1600px] mx-auto space-y-8">
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-10">
-                                <StatCard title="Active Instances" value={accounts.filter(a => a.status === 'RUNNING' || a.status === 'CONNECTED').length.toString()} icon={<Server size={18} />} color="text-violet-400" />
+                                <StatCard title="Active Instances" value={accounts.filter(a => a.status === 'RUNNING' || a.status === 'CONNECTED' || a.status === 'ACTIVE').length.toString()} icon={<Server size={18} />} color="text-violet-400" />
                                 <StatCard title="Total Accounts" value={accounts.length.toString()} icon={<Users size={18} />} color="text-fuchsia-400" />
                                 <StatCard title="Actions Performed" value="1,204" icon={<Activity size={18} />} color="text-emerald-400" />
                                 <StatCard title="System Health" value="98%" icon={<Shield size={18} />} color="text-blue-400" />
@@ -994,15 +1037,14 @@ export default function Dashboard() {
 
                             <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                                 <AnimatePresence>
-                                    {accounts.map((acc, i) => (
-                                        <AccountCard
-                                            key={acc.id}
-                                            account={acc}
-                                            active={activeAccount === acc.username}
-                                            onClick={() => setActiveAccount(acc.username)}
-                                            onLaunch={(action, autoSequence) => launchAction(acc.id, action, autoSequence)}
+                                    {accounts.map((acc, idx) => (
+                                        <AccountCard 
+                                            key={acc.id} 
+                                            account={acc} 
+                                            active={activeAccount === acc.id}
+                                            onClick={() => setActiveAccount(acc.id)}
+                                            onLaunch={(action) => launchAction(acc.id, action)}
                                             onEditProfile={() => {
-                                                setShowNewFeatures(true);
                                                 setSelectedAccount(acc);
                                                 setProfileForm({
                                                     profileImage: acc.profileImage || '',
@@ -1010,10 +1052,13 @@ export default function Dashboard() {
                                                     bannerImage: acc.bannerImage || '',
                                                     niche: acc.niche || ''
                                                 });
+                                                setShowProfileModal(true);
                                             }}
-                                            index={i}
+                                            index={idx}
                                             platform={platform}
                                             autoSequenceStatus={autoSequenceStatus}
+                                            toggleAutoMode={toggleAutoMode}
+                                            syncMetadata={syncMetadata}
                                         />
                                     ))}
                                 </AnimatePresence>
@@ -1440,20 +1485,15 @@ export default function Dashboard() {
                                         onClick={async () => {
                                             if (!newGroupName) return;
                                             try {
-                                                const res = await fetch('http://localhost:4000/api/groups', {
-                                                    method: 'POST',
-                                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('ghost_token')}` },
-                                                    body: JSON.stringify({ name: newGroupName, taskType: 'DEFAULT' })
-                                                });
-                                                if (res.ok) {
-                                                    setNewGroupName('');
-                                                    fetchGroups();
-                                                } else {
-                                                    const errorData = await res.json();
-                                                    alert(`Erreur: ${errorData.error || 'Impossible de créer le groupe'}`);
-                                                }
-                                            } catch (err) {
+                                                const res = await axios.post(`${API_BASE}/groups`, 
+                                                    { name: newGroupName, taskType: 'DEFAULT' },
+                                                    { headers: { 'Authorization': `Bearer ${token}` } }
+                                                );
+                                                setNewGroupName('');
+                                                fetchGroups();
+                                            } catch (err: any) {
                                                 console.error(err);
+                                                alert(`Erreur: ${err.response?.data?.error || 'Impossible de créer le groupe'}`);
                                             }
                                         }}
                                         className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-3 rounded-xl font-semibold transition-colors flex items-center gap-2 shadow-blue-500/20 shadow-lg"
@@ -1470,9 +1510,8 @@ export default function Dashboard() {
                                             <button 
                                                 onClick={async () => {
                                                     if(confirm('Delete group ?')) {
-                                                        await fetch(`http://localhost:4000/api/groups/${g.id}`, {
-                                                            method: 'DELETE',
-                                                            headers: { 'Authorization': `Bearer ${localStorage.getItem('ghost_token')}` }
+                                                        await axios.delete(`${API_BASE}/groups/${g.id}`, {
+                                                            headers: { 'Authorization': `Bearer ${token}` }
                                                         });
                                                         fetchGroups();
                                                     }
@@ -1556,10 +1595,21 @@ export default function Dashboard() {
                                 <div className="lg:col-span-8">
                                     {selectedCampaign ? (
                                         <div className="bg-white/5 border border-white/10 rounded-3xl p-8 backdrop-blur-xl">
-                                            <div className="flex justify-between items-center mb-8">
-                                                <h2 className="text-2xl font-bold flex items-center gap-3 text-white">
-                                                    <Sparkles className="text-yellow-400" /> Ajouter du Contenu à {selectedCampaign.name}
-                                                </h2>
+                                            <div className="flex justify-between items-start mb-8">
+                                                <div>
+                                                    <h2 className="text-2xl font-bold flex items-center gap-3 text-white">
+                                                        <Sparkles className="text-yellow-400" /> Ajouter du Contenu à {selectedCampaign.name}
+                                                    </h2>
+                                                    {selectedCampaign.targetCommunities?.length > 0 && (
+                                                        <div className="flex flex-wrap gap-2 mt-3">
+                                                            {selectedCampaign.targetCommunities.map((c: string, i: number) => (
+                                                                <span key={i} className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 flex items-center gap-1">
+                                                                    <LinkIcon size={8} /> {c.split('/').pop() || c}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
 
                                             <form onSubmit={addContent} className="space-y-6">
@@ -1579,15 +1629,40 @@ export default function Dashboard() {
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div>
                                                         <label className="block text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">
-                                                            <LinkIcon size={16} /> Lien (Optionnel)
+                                                            <LinkIcon size={16} /> Lien du compte / Post (Optionnel)
                                                         </label>
                                                         <input 
                                                             type="url"
                                                             value={linkUrl}
                                                             onChange={(e) => setLinkUrl(e.target.value)}
                                                             className="w-full bg-[#121217] border border-white/10 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-white"
-                                                            placeholder="https://..."
+                                                            placeholder="https://x.com/username/status/..."
                                                         />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">
+                                                            <Users size={16} /> Communauté Cible (Optionnel)
+                                                        </label>
+                                                        {selectedCampaign.targetCommunities?.length > 0 ? (
+                                                            <select 
+                                                                value={targetCommunity}
+                                                                onChange={(e) => setTargetCommunity(e.target.value)}
+                                                                className="w-full bg-[#121217] border border-white/10 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-white appearance-none"
+                                                            >
+                                                                <option value="">Sélectionner une communauté...</option>
+                                                                {selectedCampaign.targetCommunities.map((c: string, i: number) => (
+                                                                    <option key={i} value={c}>{c.split('/').pop() || c}</option>
+                                                                ))}
+                                                            </select>
+                                                        ) : (
+                                                            <input 
+                                                                type="text"
+                                                                value={targetCommunity}
+                                                                onChange={(e) => setTargetCommunity(e.target.value)}
+                                                                className="w-full bg-[#121217] border border-white/10 rounded-xl p-4 focus:ring-2 focus:ring-blue-500 outline-none transition-all text-white"
+                                                                placeholder="Lien de la communauté"
+                                                            />
+                                                        )}
                                                     </div>
                                                     <div>
                                                         <label className="block text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">
@@ -1612,7 +1687,7 @@ export default function Dashboard() {
                                                         <>
                                                             <Send size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" /> 
                                                             Ajouter au Pool
-                                                        </>
+                                                       </>
                                                     )}
                                                 </button>
                                             </form>
@@ -1623,7 +1698,12 @@ export default function Dashboard() {
                                                     {selectedCampaign.contents?.map((item: any) => (
                                                         <div key={item.id} className="bg-[#121217] p-5 rounded-2xl border border-white/5 group relative">
                                                             <p className="text-sm text-gray-300 line-clamp-3">{item.caption}</p>
-                                                            {item.linkUrl && <p className="text-xs text-blue-400 mt-2 truncate">{item.linkUrl}</p>}
+                                                            {item.linkUrl && <p className="text-xs text-blue-400 mt-2 truncate">Link: {item.linkUrl}</p>}
+                                                            {item.targetCommunity && (
+                                                                <p className="text-[10px] text-fuchsia-400 mt-1 flex items-center gap-1">
+                                                                    <Users size={10} /> Community: {item.targetCommunity.split('/').pop()}
+                                                                </p>
+                                                            )}
                                                             {item.mediaUrls?.length > 0 && (
                                                                 <div className="mt-3 flex gap-2 overflow-x-auto pb-2">
                                                                     {item.mediaUrls.map((m: string, idx: number) => (
@@ -1687,14 +1767,27 @@ export default function Dashboard() {
                                     </div>
                                     <div className="space-y-4">
                                         <div>
-                                            <label className="text-xs uppercase tracking-widest text-white/40 font-bold mb-2 block">Max Posts Per Day / Acc</label>
-                                            <input 
-                                                type="number"
-                                                value={globalSettings.postsPerDayLimit}
-                                                onChange={(e) => setGlobalSettings({...globalSettings, postsPerDayLimit: parseInt(e.target.value)})}
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-violet-500/50 outline-none transition-all"
-                                            />
-                                            <p className="text-[10px] text-white/20 mt-2 italic">Limits activity to stay under X's detection threshold (Recommended: 3-5).</p>
+                                            <label className="text-xs uppercase tracking-widest text-white/40 font-bold mb-2 block">Fréquence de Publication</label>
+                                            <div className="flex gap-4">
+                                                <input 
+                                                    type="number"
+                                                    value={isNaN(globalSettings.postIntervalValue) ? '' : globalSettings.postIntervalValue}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                                                        setGlobalSettings({...globalSettings, postIntervalValue: val});
+                                                    }}
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-violet-500/50 outline-none transition-all"
+                                                />
+                                                <select 
+                                                    value={globalSettings.postIntervalUnit}
+                                                    onChange={(e) => setGlobalSettings({...globalSettings, postIntervalUnit: e.target.value as 'MINUTES' | 'HOURS'})}
+                                                    className="bg-[#050505] border border-white/10 rounded-xl px-4 py-3 text-white focus:border-violet-500/50 outline-none transition-all cursor-pointer"
+                                                >
+                                                    <option value="MINUTES">Minutes</option>
+                                                    <option value="HOURS">Heures</option>
+                                                </select>
+                                            </div>
+                                            <p className="text-[10px] text-white/20 mt-2 italic">Définit le délai d'attente entre chaque publication pour un compte MAIN.</p>
                                         </div>
                                     </div>
                                 </section>
@@ -1711,8 +1804,11 @@ export default function Dashboard() {
                                             <label className="text-xs uppercase tracking-widest text-white/40 font-bold mb-2 block">Max Comments Per Main Post</label>
                                             <input 
                                                 type="number"
-                                                value={globalSettings.commentsPerPostLimit}
-                                                onChange={(e) => setGlobalSettings({...globalSettings, commentsPerPostLimit: parseInt(e.target.value)})}
+                                                value={isNaN(globalSettings.commentsPerPostLimit) ? '' : globalSettings.commentsPerPostLimit}
+                                                onChange={(e) => {
+                                                    const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                                                    setGlobalSettings({...globalSettings, commentsPerPostLimit: val});
+                                                }}
                                                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-violet-500/50 outline-none transition-all"
                                             />
                                             <p className="text-[10px] text-white/20 mt-2 italic">Defines how many support accounts will reply to a new main post.</p>
@@ -1909,28 +2005,69 @@ export default function Dashboard() {
                                                     <HelpCircle size={18} className="text-blue-400" />
                                                 </button>
                                             </div>
-                                            
                                             <div className="space-y-3">
-                                                <div>
-                                                    <label className="text-[11px] font-medium text-blue-300 mb-1 block">
-                                                        Cookies (JSON Array ou auth_token) <span className="text-red-400">*</span>
-                                                    </label>
-                                                    <textarea
-                                                        value={twitterCookies}
-                                                        onChange={(e) => setTwitterCookies(e.target.value)}
-                                                        placeholder='[{"name": "auth_token", "value": "..."}, ...]'
-                                                        className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all min-h-[80px]"
-                                                        required
-                                                    />
-                                                    <p className="text-[10px] text-blue-400/60 mt-1">
-                                                        Conseillé : Utilisez "EditThisCookie" (JSON) pour exporter tous les cookies
-                                                    </p>
+                                                <div className="flex gap-2 p-1 bg-white/5 rounded-lg mb-2">
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setTwitterCookies('')}
+                                                        className={`flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md transition-all ${!twitterCookies.startsWith('[') ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/60'}`}
+                                                    >
+                                                        Mode Simplifié
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => { if(!twitterCookies.startsWith('[')) setTwitterCookies('[]'); }}
+                                                        className={`flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md transition-all ${twitterCookies.startsWith('[') ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/60'}`}
+                                                    >
+                                                        Mode Expert (JSON Array)
+                                                    </button>
                                                 </div>
+
+                                                {!twitterCookies.startsWith('[') ? (
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <label className="text-[11px] font-medium text-blue-300 mb-1 block">
+                                                                auth_token <span className="text-red-400">*</span>
+                                                            </label>
+                                                            <input 
+                                                                type="text"
+                                                                value={twitterCookies}
+                                                                onChange={(e) => setTwitterCookies(e.target.value)}
+                                                                placeholder="8bbfbb5f4b0fe3ab..."
+                                                                className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[11px] font-medium text-blue-300 mb-1 block">
+                                                                ct0 (Requis pour poster) <span className="text-red-400">*</span>
+                                                            </label>
+                                                            <input 
+                                                                type="text"
+                                                                value={twitterCt0}
+                                                                onChange={(e) => setTwitterCt0(e.target.value)}
+                                                                placeholder="c54f5c857297f53e..."
+                                                                className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <label className="text-[11px] font-medium text-blue-300 mb-1 block">
+                                                            JSON Array <span className="text-red-400">*</span>
+                                                        </label>
+                                                        <textarea
+                                                            value={twitterCookies}
+                                                            onChange={(e) => setTwitterCookies(e.target.value)}
+                                                            placeholder='[{"name": "auth_token", "value": "..."}, ...]'
+                                                            className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all min-h-[120px]"
+                                                        />
+                                                    </div>
+                                                )}
                                             </div>
 
                                             <div className="p-3 bg-blue-900/20 border border-blue-500/20 rounded-lg">
                                                 <p className="text-[10px] text-blue-300">
-                                                    💡 <strong>Requis:</strong> auth_token uniquement. CT0 est recommandé pour les requêtes API.
+                                                    💡 <strong>Requis :</strong> auth_token et ct0 pour swarmer.
                                                 </p>
                                             </div>
                                         </div>
@@ -2051,17 +2188,63 @@ export default function Dashboard() {
                                             </div>
                                             
                                             <div className="space-y-3">
-                                                <div>
-                                                    <label className="text-[11px] font-medium text-blue-300 mb-1 block">
-                                                        Cookies JSON (Array) ou auth_token
-                                                    </label>
-                                                    <textarea
-                                                        value={twitterCookies}
-                                                        onChange={(e) => setTwitterCookies(e.target.value)}
-                                                        placeholder='Laissez vide pour conserver les cookies actuels'
-                                                        className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all min-h-[80px]"
-                                                    />
+                                                <div className="flex gap-2 p-1 bg-white/5 rounded-lg mb-2">
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setTwitterCookies('')}
+                                                        className={`flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md transition-all ${!twitterCookies.startsWith('[') ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/60'}`}
+                                                    >
+                                                        Mode Simplifié
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => { if(!twitterCookies.startsWith('[')) setTwitterCookies('[]'); }}
+                                                        className={`flex-1 py-1.5 text-[10px] uppercase font-bold rounded-md transition-all ${twitterCookies.startsWith('[') ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/60'}`}
+                                                    >
+                                                        Mode Expert (JSON Array)
+                                                    </button>
                                                 </div>
+
+                                                {!twitterCookies.startsWith('[') ? (
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <label className="text-[11px] font-medium text-blue-300 mb-1 block">
+                                                                auth_token <span className="text-red-400">*</span>
+                                                            </label>
+                                                            <input 
+                                                                type="text"
+                                                                value={twitterCookies}
+                                                                onChange={(e) => setTwitterCookies(e.target.value)}
+                                                                placeholder="8bbfbb5f4b0fe3ab..."
+                                                                className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all"
+                                                            />
+                                                        </div>
+                                                        <div>
+                                                            <label className="text-[11px] font-medium text-blue-300 mb-1 block">
+                                                                ct0 (Requis pour poster) <span className="text-red-400">*</span>
+                                                            </label>
+                                                            <input 
+                                                                type="text"
+                                                                value={twitterCt0}
+                                                                onChange={(e) => setTwitterCt0(e.target.value)}
+                                                                placeholder="c54f5c857297f53e..."
+                                                                className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <label className="text-[11px] font-medium text-blue-300 mb-1 block">
+                                                            JSON Array <span className="text-red-400">*</span>
+                                                        </label>
+                                                        <textarea
+                                                            value={twitterCookies}
+                                                            onChange={(e) => setTwitterCookies(e.target.value)}
+                                                            placeholder='[{"name": "auth_token", "value": "..."}, ...]'
+                                                            className="w-full bg-black/40 border border-white/10 focus:border-blue-500/50 outline-none px-4 py-3 rounded-xl text-sm text-white/90 focus:bg-white/[0.02] transition-all min-h-[120px]"
+                                                        />
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </>
@@ -2132,14 +2315,25 @@ export default function Dashboard() {
                             </p>
                             
                             <div className="space-y-5">
-                                <Input label="Nom de la campagne" icon={<Megaphone size={16}/>} value={newCampaignName} onChange={setNewCampaignName} />
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Nom de la campagne</label>
+                                    <div className="relative">
+                                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><Megaphone size={16} /></div>
+                                        <input 
+                                            value={newCampaignName} 
+                                            onChange={(e) => setNewCampaignName(e.target.value)}
+                                            placeholder="Ex: Lancement Roberta"
+                                            className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02]"
+                                        />
+                                    </div>
+                                </div>
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Assign to Group</label>
                                     <div className="relative">
                                         <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><FolderTree size={16} /></div>
                                         <select 
-                                            value={newAcc.groupId || ''} 
-                                            onChange={(e) => setNewAcc({...newAcc, groupId: e.target.value})}
+                                            value={newCampaignGroupId} 
+                                            onChange={(e) => setNewCampaignGroupId(e.target.value)}
                                             className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
                                         >
                                             <option value="">No Group (Global)</option>
@@ -2147,6 +2341,37 @@ export default function Dashboard() {
                                                 <option key={g.id} value={g.id}>{g.name}</option>
                                             ))}
                                         </select>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Liens des Communautés (Un par ligne)</label>
+                                    <textarea 
+                                        placeholder="https://x.com/i/communities/..."
+                                        value={newCampaignCommunities}
+                                        onChange={(e) => setNewCampaignCommunities(e.target.value)}
+                                        className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none p-4 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] h-24"
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Posts / Compte</label>
+                                        <input 
+                                            type="number"
+                                            value={newCampaignPostsPerAcc}
+                                            onChange={(e) => setNewCampaignPostsPerAcc(parseInt(e.target.value) || 0)}
+                                            className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none px-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02]"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Comments / Post</label>
+                                        <input 
+                                            type="number"
+                                            value={newCampaignCommentsPerPost}
+                                            onChange={(e) => setNewCampaignCommentsPerPost(parseInt(e.target.value) || 0)}
+                                            className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none px-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02]"
+                                        />
                                     </div>
                                 </div>
                                 
@@ -2522,7 +2747,7 @@ function SidebarIcon({ icon, active, onClick, title }: { icon: any, active?: boo
     );
 }
 
-function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index, platform, autoSequenceStatus }: { 
+function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index, platform, autoSequenceStatus, toggleAutoMode, syncMetadata }: { 
     account: Account, 
     active: boolean, 
     onClick: () => void, 
@@ -2530,7 +2755,9 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
     onEditProfile: () => void,
     index: number,
     platform: 'TWITTER' | 'INSTAGRAM',
-    autoSequenceStatus: {[key: string]: any}
+    autoSequenceStatus: {[key: string]: any},
+    toggleAutoMode: (id: string, current: boolean) => void,
+    syncMetadata: (id: string) => void
 }) {
     const statusTheme = getStatusColor(account.status || 'IDLE');
     const actionLabels: Record<string, string> = {
@@ -2542,10 +2769,12 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
     };
 
     const platformActions = platform === 'TWITTER' ? [
-        { id: 'warmUp', label: 'Day 1: Warm-up & Interaction'},
-        { id: 'follow', label: 'Day 2: Follow Targets'},
-        { id: 'postCommunity', label: 'Day 3: Post Captions'},
-        { id: 'spamComments', label: 'Day 4: Spam Comments (Support)'},
+        ...(account.type === 'MAIN' ? [
+            { id: 'warmUp', label: 'Day 1: Warm-up & Interaction'},
+            { id: 'follow', label: 'Day 2: Follow Targets'},
+            { id: 'postCommunity', label: 'Day 3: Post Captions'},
+        ] : []),
+        { id: 'spamComments', label: account.type === 'SUPPORT' ? 'Day 4: Spam Comments (Support)' : 'Spam Comments'},
         { id: 'updateProfile', label: '🪪 Mettre à jour le Profil'}
     ] : [
         { id: 'warmUp', label: 'Warm Up Account'},
@@ -2553,6 +2782,20 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
     ];
 
     const [showActions, setShowActions] = useState(false);
+
+    // Dynamic Session Health Check
+    const sessionHealth = useMemo(() => {
+        if (!account.sessionCookies || !Array.isArray(account.sessionCookies)) return { status: 'MISSING', label: 'No Cookies', color: 'text-rose-400' };
+        const cookies = account.sessionCookies as any[];
+        const hasAuthToken = cookies.some(c => c.name === 'auth_token');
+        const hasCt0 = cookies.some(c => c.name === 'ct0');
+        
+        if (!hasAuthToken) return { status: 'DEAD', label: 'Auth Token Missing', color: 'text-rose-500 font-bold' };
+        if (!hasCt0) return { status: 'FRAGILE', label: 'ct0 Missing (Fragile)', color: 'text-amber-400' };
+        if (cookies.length < 5) return { status: 'WEAK', label: 'Cookies Incomplets', color: 'text-amber-500' };
+        
+        return { status: 'HEALTHY', label: 'Session OK', color: 'text-emerald-400' };
+    }, [account.sessionCookies]);
 
     return (
         <motion.div 
@@ -2579,6 +2822,8 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
                     <div className="flex items-center gap-1.5 mt-0.5">
                         <div className={`w-1.5 h-1.5 rounded-full ${statusTheme.dot}`} />
                         <span className={`text-[10px] uppercase font-mono tracking-wider ${statusTheme.dot.replace('bg-', 'text-')}`}>{account.status || 'IDLE'}</span>
+                        <span className="text-white/20">•</span>
+                        <span className={`text-[10px] font-medium ${sessionHealth.color}`}>{sessionHealth.label}</span>
                     </div>
                     <div className="flex flex-wrap gap-1 mt-1">
                         <button 

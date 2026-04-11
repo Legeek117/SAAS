@@ -125,6 +125,7 @@ model TwitterPost {
   retweets      Int            @default(0)
   replies       Int            @default(0)
   impressions   Int            @default(0)
+  postUrl       String?
   accountId     String
   createdAt     DateTime       @default(now())
   account       TwitterAccount @relation(fields: [accountId], references: [id])
@@ -249,13 +250,14 @@ model GlobalSettings {
 }
 
 model CampaignContent {
-  id         String   @id @default(uuid())
-  caption    String?
-  mediaUrls  String[]
-  linkUrl    String?
-  usedCount  Int      @default(0)
-  campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  id              String   @id @default(uuid())
+  caption         String?
+  mediaUrls       String[]
+  linkUrl         String?
+  targetCommunity String?
+  usedCount       Int      @default(0)
+  campaignId      String
+  campaign        Campaign @relation(fields: [campaignId], references: [id])
 }
 
 enum UserRole {
