@@ -1315,6 +1315,105 @@ export default function Dashboard() {
                         </motion.div>
                     )}
 
+                    {viewMode === 'ORCHESTRATION' && (
+                        <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-7xl mx-auto space-y-8">
+                            <div className="flex justify-between items-center mb-8">
+                                <div>
+                                    <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-fuchsia-500 bg-clip-text text-transparent flex items-center gap-3">
+                                        <Users className="text-blue-400" size={32} /> Social Mastermind
+                                    </h1>
+                                    <p className="text-white/50 mt-1 text-sm font-medium">Visualisation de l'architecture d'essaimage (Swarm) par groupes.</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-8">
+                                {groups.map(group => {
+                                    const groupAccounts = accounts.filter(a => a.groupId === group.id);
+                                    const mainAccounts = groupAccounts.filter(a => a.type === 'MAIN');
+                                    const supportAccounts = groupAccounts.filter(a => a.type === 'SUPPORT');
+
+                                    return (
+                                        <div key={group.id} className="bg-[#0f0f11] border border-white/10 rounded-[32px] p-6 relative overflow-hidden shadow-2xl hover:border-white/20 transition-all flex flex-col group/card">
+                                            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 opacity-50" />
+                                            
+                                            <div className="relative z-10 flex justify-between items-start mb-6">
+                                                <div>
+                                                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                                                        <FolderTree size={20} className="text-blue-400" /> {group.name}
+                                                    </h3>
+                                                    <div className="text-xs text-white/40 font-mono mt-1">ID: {group.id}</div>
+                                                </div>
+                                                <div className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-[10px] uppercase font-bold tracking-wider text-white/60">
+                                                    {groupAccounts.length} Nodes
+                                                </div>
+                                            </div>
+
+                                            <div className="relative z-10 flex-1 flex flex-col gap-6">
+                                                {/* MAIN Nodes */}
+                                                <div className="bg-black/40 rounded-2xl p-4 border border-blue-500/20">
+                                                    <div className="text-[10px] uppercase tracking-widest font-bold text-blue-400 mb-3 flex items-center gap-2">
+                                                        <Briefcase size={12} /> Cerveaux (Main)
+                                                    </div>
+                                                    <div className="flex flex-col gap-2">
+                                                        {mainAccounts.length === 0 ? (
+                                                            <div className="text-xs text-white/30 italic">Aucun compte Main assigné</div>
+                                                        ) : (
+                                                            mainAccounts.map(main => (
+                                                                <div key={main.id} className="flex items-center gap-3 p-2 rounded-xl bg-blue-500/10 border border-blue-500/20">
+                                                                    <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+                                                                        <Briefcase size={14} />
+                                                                    </div>
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="font-bold text-sm text-white truncate">@{main.username}</div>
+                                                                        <div className="text-[10px] text-blue-300/70 truncate flex items-center gap-1">
+                                                                            <Activity size={10} /> {main.status}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                {/* SUPPORT Nodes */}
+                                                <div className="bg-black/40 rounded-2xl p-4 border border-fuchsia-500/20 flex-1">
+                                                    <div className="text-[10px] uppercase tracking-widest font-bold text-fuchsia-400 mb-3 flex items-center gap-2">
+                                                        <Users size={12} /> Essaim (Support)
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {supportAccounts.length === 0 ? (
+                                                            <div className="text-xs text-white/30 italic">Aucun bot Support assigné</div>
+                                                        ) : (
+                                                            supportAccounts.map(support => (
+                                                                <div key={support.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fuchsia-500/10 border border-fuchsia-500/20 text-xs">
+                                                                    <span className="text-fuchsia-400 font-medium">@{support.username}</span>
+                                                                    <div className={`w-1.5 h-1.5 rounded-full ${support.status === 'RUNNING' ? 'bg-emerald-400 animate-pulse' : 'bg-fuchsia-500/50'}`} title={support.status} />
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Action Bar */}
+                                            <div className="mt-6 pt-4 border-t border-white/10 relative z-10 flex justify-between items-center">
+                                                <span className="text-xs text-white/40">Ratio: 1 Main / {supportAccounts.length} Supports</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+
+                                {groups.length === 0 && (
+                                    <div className="col-span-full py-20 text-center border border-dashed border-white/10 rounded-[40px] bg-white/[0.01]">
+                                        <Users size={64} className="mx-auto text-white/10 mb-6" />
+                                        <h3 className="text-xl font-bold text-white/70 mb-2">Aucun Groupe Mastermind</h3>
+                                        <p className="text-white/40">Créez des groupes dans l'onglet Manage Groups pour commencer l'essaimage.</p>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+
                     {viewMode === 'GROUPS' && (
                         <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto space-y-8">
                             <div className="flex justify-between items-center mb-8">
