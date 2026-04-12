@@ -313,8 +313,10 @@ async function createStealthSession(
 
     // Launch browser with stealth args
     emitLog("🚀 Initialisation de la session furtive...");
+    const isHeadless = process.env.HEADLESS === 'true' || false;
+    
     const browser = await chromium.launch({
-        headless: false,
+        headless: isHeadless,
         proxy: proxyConfig,
         args: [
             '--no-sandbox',
