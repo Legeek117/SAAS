@@ -77,14 +77,24 @@ app.post('/api/auth/register', async (req, res) => {
     const { email, password } = req.body;
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // Check if this is the first user to make them admin automatically
+        const userCount = await prisma.user.count();
+        const isFirstUser = userCount === 0;
+
         const user = await prisma.user.create({
             data: { 
                 email, 
                 password: hashedPassword,
-                isActive: false 
+                isActive: isFirstUser, // Auto-activate first user
+                role: isFirstUser ? UserRole.ADMIN : UserRole.USER
             }
         });
-        res.status(201).json({ message: 'Utilisateur créé avec succès' });
+        res.status(201).json({ 
+            message: isFirstUser 
+                ? 'Administrateur créé et activé avec succès' 
+                : 'Utilisateur créé avec succès' 
+        });
     } catch (error: any) {
         res.status(400).json({ error: 'Email déjà utilisé ou données invalides' });
     }

@@ -12,6 +12,17 @@ import { twitterScheduler } from './utils/scheduler';
 
 dotenv.config();
 
+console.log("🚀 WORKER PROCESS STARTED - ATTEMPTING TO INITIALIZE...");
+
+// Catch unhandled errors
+process.on('uncaughtException', (err) => {
+    console.error('🔥 CRITICAL ERROR (Uncaught Exception):', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 CRITICAL ERROR (Unhandled Rejection):', reason);
+});
+
 const logFile = path.join(process.cwd(), 'worker_debug.log');
 const debugLog = (msg: string) => {
     try {

@@ -45,4 +45,4 @@ RUN npm run build
 
 ENV NODE_ENV production
 
-CMD ["xvfb-run", "--server-args=-screen 0 1280x1024x24", "npm", "start"]
+CMD ["npm", "start"]
