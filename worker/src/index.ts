@@ -23,7 +23,7 @@ const debugLog = (msg: string) => {
     console.log(msg);
 };
 
-const HEADLESS = false;
+const HEADLESS = true;
 const prisma = new PrismaClient();
 const socket = io(process.env.BACKEND_SOCKET_URL || 'http://saas-backend:4000');
 

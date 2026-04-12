@@ -24,9 +24,9 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Install ALL dependencies first (including devDependencies like tsc)
+# Install dependencies (Force include dev deps for tsc)
 COPY package*.json ./
-RUN npm install
+RUN npm install --include=dev
 
 # Install Playwright browsers (Chromium)
 RUN npx playwright install chromium --with-deps
@@ -37,10 +37,12 @@ COPY . .
 # Generate Prisma Client
 RUN npx prisma generate
 
-# Build the application (tsc is now available)
+# Build the application
 RUN npm run build
 
-# Set production mode ONLY after build
+# Final Cleanup (optional but good for RAM)
+# RUN npm prune --production
+
 ENV NODE_ENV production
 
 CMD ["xvfb-run", "--server-args=-screen 0 1280x1024x24", "npm", "start"]
