@@ -12,8 +12,27 @@ import path from 'path';
 import https from 'https';
 import http from 'http';
 
+const logFile = path.join(process.cwd(), 'worker_debug.log');
+const debugLog = (msg: string) => {
+    try {
+        const entry = `[${new Date().toISOString()}] ${msg}\n`;
+        fs.appendFileSync(logFile, entry);
+    } catch (e: any) {
+        console.error(`Failed to write to ${logFile}: ${e.message}`);
+    }
+    console.log(msg);
+};
+
 const prisma = new PrismaClient();
 const socket = io(process.env.BACKEND_SOCKET_URL || 'http://saas-backend:4000');
+
+socket.on('connect', () => {
+    debugLog(`✅ [Twitter Handler] Socket connected to backend: ${socket.id}`);
+});
+
+socket.on('connect_error', (error) => {
+    debugLog(`❌ [Twitter Handler] Socket connection error: ${error.message}`);
+});
 
 chromium.use(stealth());
 
@@ -295,9 +314,8 @@ async function createStealthSession(
     // Launch browser with stealth args
     emitLog("🚀 Initialisation de la session furtive...");
     const browser = await chromium.launch({
-        headless: true,
+        headless: false,
         proxy: proxyConfig,
-        executablePath: '/usr/bin/google-chrome', // Force use of system chrome
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -643,8 +661,8 @@ async function doManualLogin(
 async function dismissPopups(page: Page, emitLog: (msg: string) => void): Promise<void> {
     try {
         // "Unlock more on X" / "Got it" button
-        const gotItBtn = page.locator('button:has-text("Got it"), span:has-text("Got it"), div[role="button"]:has-text("Got it")').first();
-        if (await gotItBtn.isVisible({ timeout: 2500 }).catch(() => false)) {
+        const gotItBtn = page.locator('button:has-text("Got it"), span:has-text("Got it"), div[role="button"]:has-text("Got it"), [data-testid="gotItButton"]').first();
+        if (await gotItBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
             emitLog("💡 Popup 'Unlock more on X' détectée — fermeture...");
             await humanClick(page, gotItBtn);
             await sleep(1000);
@@ -670,42 +688,53 @@ async function dismissPopups(page: Page, emitLog: (msg: string) => void): Promis
 }
 
 async function validateSession(page: Page, emitLog: (msg: string) => void): Promise<boolean> {
-    try {
-        emitLog("🔄 Vérification de la session existante...");
-        // Use domcontentloaded + shorter timeout for faster validation
-        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 15000 });
-        await sleep(3000);
+    emitLog("🔄 Vérification de la session existante...");
+    
+    let attempts = 0;
+    const maxAttempts = 3;
 
-        // If still on login or redirected to login, cookies are dead
-        if (page.url().includes('/login') || page.url().includes('/i/flow/login')) {
-            emitLog("❌ Session invalide (Redirection vers login).");
-            return false;
+    while (attempts < maxAttempts) {
+        attempts++;
+        try {
+            // Use domcontentloaded + shorter timeout for faster validation
+            if (attempts > 1) emitLog(`🔄 Tentative ${attempts}/${maxAttempts} d'accès à la page d'accueil...`);
+            await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 20000 });
+            await sleep(3000);
+
+            // If still on login or redirected to login, cookies are dead
+            if (page.url().includes('/login') || page.url().includes('/i/flow/login')) {
+                emitLog("❌ Session invalide (Redirection vers login).");
+                return false;
+            }
+
+            // Quick check for authenticated layout without waiting for full network idle
+            const authenticated = await page.evaluate(() => {
+                return !!document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]') || 
+                       !!document.querySelector('nav[aria-label="Primary"]') ||
+                       !!document.querySelector('[data-testid="SideNav_NewTweet_Button"]');
+            });
+
+            if (authenticated) {
+                emitLog("✅ Session valide!");
+                return true;
+            }
+
+            emitLog(`⚠️ Layout non détecté à la tentative ${attempts}.`);
+            if (attempts < maxAttempts) {
+                await sleep(3000); // Wait before retrying
+                continue; // Loop again
+            }
+
+        } catch (error: any) {
+            emitLog(`⚠️ Erreur réseau à la tentative ${attempts}: ${error.message}`);
+            if (attempts >= maxAttempts) {
+                return false;
+            }
+            await sleep(4000); // Wait before retrying
         }
-
-        // Quick check for authenticated layout without waiting for full network idle
-        const authenticated = await page.evaluate(() => {
-            return !!document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]') || 
-                   !!document.querySelector('nav[aria-label="Primary"]') ||
-                   !!document.querySelector('[data-testid="SideNav_NewTweet_Button"]');
-        });
-
-        if (authenticated) {
-            emitLog("✅ Session valide!");
-            return true;
-        }
-
-        emitLog("⚠️ Session incertaine (Layout non détecté). Tentative de rafraîchissement...");
-        await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-        await sleep(3000);
-        
-        return await page.evaluate(() => {
-            return !!document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]') || 
-                   !!document.querySelector('nav[aria-label="Primary"]');
-        });
-    } catch (error: any) {
-        emitLog(`⚠️ Erreur de validation: ${error.message}`);
-        return false;
     }
+    
+    return false;
 }
 
 /**
@@ -723,7 +752,7 @@ async function retryAction(page: Page, emitLog: (msg: string) => void, actionFn:
             
             if (i < maxRetries - 1) {
                 emitLog("🔄 Tentative de guérison de la session...");
-                await page.reload({ waitUntil: 'networkidle' }).catch(() => {});
+                await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
                 await sleep(5000);
                 
                 // Re-validate session
@@ -777,8 +806,9 @@ async function doAutoLike(page: Page, emitLog: (msg: string) => void, config: an
     // IF specific URL provided (Social Orchestration)
     if (config?.url) {
         emitLog(`🎯 Directed Like on: ${config.url}`);
-        await page.goto(config.url, { waitUntil: 'networkidle', timeout: 30000 });
+        await page.goto(config.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await sleep(randomRange(3000, 5000));
+        await dismissPopups(page, emitLog);
         
         const likeBtn = page.locator('[data-testid="like"]').first();
         if (await likeBtn.isVisible({ timeout: 5000 })) {
@@ -891,6 +921,31 @@ async function doAutoRetweet(page: Page, emitLog: (msg: string) => void, config:
     const count = config?.count || randomRange(2, 5);
     emitLog(`🔁 Auto-Retweet : Ciblage de ${count} posts de contenu adulte...`);
 
+    // IF specific URL provided (Social Orchestration)
+    if (config?.url) {
+        emitLog(`🎯 Directed Retweet on: ${config.url}`);
+        await page.goto(config.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await sleep(randomRange(3000, 5000));
+        await dismissPopups(page, emitLog);
+        
+        const rtBtn = page.locator('[data-testid="retweet"]').first();
+        if (await rtBtn.isVisible({ timeout: 5000 })) {
+            const label = await rtBtn.getAttribute('aria-label');
+            if (label && label.toLowerCase().includes('retweet') && !label.toLowerCase().includes('retweeted')) {
+                await humanClick(page, rtBtn);
+                await sleep(2000);
+                const confirmBtn = page.locator('[data-testid="retweetConfirm"]').first();
+                if (await confirmBtn.isVisible({ timeout: 5000 })) {
+                    await humanClick(page, confirmBtn);
+                    emitLog(`✅ Orchestration retweet successful.`);
+                }
+            } else {
+                emitLog(`ℹ️ Already retweeted or button state unclear.`);
+            }
+            return;
+        }
+    }
+
     // Search for adult content to retweet
     const adultKeywords = ['onlyfans', 'nsfw', 'adult content', '18+', 'model'];
     const keyword = adultKeywords[randomRange(0, adultKeywords.length - 1)];
@@ -898,6 +953,7 @@ async function doAutoRetweet(page: Page, emitLog: (msg: string) => void, config:
     emitLog(`🔍 Recherche: "${keyword}" (contenu adulte)`);
     await page.goto(`https://x.com/search?q=${encodeURIComponent(keyword)}`, { waitUntil: 'domcontentloaded' });
     await sleep(randomRange(4000, 7000));
+    await dismissPopups(page, emitLog);
 
     let retweeted = 0;
     let scrollAttempts = 0;
@@ -970,24 +1026,35 @@ async function doAutoComment(page: Page, emitLog: (msg: string) => void, config:
     
     // IF specific URL provided (Social Orchestration)
     if (config?.url) {
-        emitLog(`🎯 Directed engagement on: ${config.url}`);
-        await page.goto(config.url, { waitUntil: 'networkidle', timeout: 30000 });
+        emitLog(`🎯 Directed engagement on: ${config.url} with ${count} comments`);
+        await page.goto(config.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         await sleep(randomRange(3000, 5000));
         
-        const replyBtn = page.locator('[data-testid="reply"]').first();
-        if (await replyBtn.isVisible({ timeout: 5000 })) {
-            await humanClick(page, replyBtn);
-            await sleep(2000);
-            
-            const textArea = '[data-testid="tweetTextarea_0"]';
-            const comment = customComments[randomRange(0, customComments.length - 1)];
-            await humanType(page, textArea, comment);
-            await sleep(2000);
-            
-            await humanClick(page, page.locator('[data-testid="tweetButton"]').first());
-            emitLog(`✅ Orchestration comment posted.`);
-            return;
+        for (let i = 0; i < count; i++) {
+            await dismissPopups(page, emitLog);
+            const replyBtn = page.locator('[data-testid="reply"]').first();
+            if (await replyBtn.isVisible({ timeout: 5000 })) {
+                await humanClick(page, replyBtn);
+                await sleep(2000);
+                
+                const textArea = '[data-testid="tweetTextarea_0"]';
+                const comment = customComments[randomRange(0, customComments.length - 1)];
+                await humanType(page, textArea, comment);
+                await sleep(2000);
+                
+                await humanClick(page, page.locator('[data-testid="tweetButton"]').first());
+                emitLog(`✅ Orchestration comment ${i+1}/${count} posted: "${comment}"`);
+                
+                // If there are more comments to post, wait a bit before the next one
+                if (i < count - 1) {
+                    await sleep(randomRange(5000, 10000));
+                }
+            } else {
+                emitLog(`⚠️ Could not find reply button for comment ${i+1}.`);
+                break;
+            }
         }
+        return;
     }
 
     // Search ONLY for OnlyFans content creators
@@ -1015,6 +1082,7 @@ async function doAutoComment(page: Page, emitLog: (msg: string) => void, config:
 
     while (commented < count && scrollAttempts < 15) {
         const replyBtns = await page.$$('[data-testid="reply"]');
+        emitLog(`👀 Detected ${replyBtns.length} reply buttons on page (Attempt ${scrollAttempts + 1}/15)`);
 
         for (const btn of replyBtns) {
             if (commented >= count) break;
@@ -1312,9 +1380,27 @@ async function downloadImage(url: string, prefix: string): Promise<string | null
 async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: any, username: string) {
     emitLog("📝 Auto-Post : Publication d'un tweet...");
 
-    // Navigate to home
-    await page.goto('https://x.com/home', { waitUntil: 'networkidle', timeout: 30000 });
-    await sleep(randomRange(3000, 5000));
+    // Navigate to home with retry logic
+    let homeLoaded = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            if (attempt > 1) emitLog(`🔄 Tentative ${attempt}/3 de chargement de la page d'accueil...`);
+            await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 25000 });
+            homeLoaded = true;
+            break;
+        } catch (navErr: any) {
+            emitLog(`⚠️ Navigation échouée (tentative ${attempt}/3): ${navErr.message.split('\n')[0]}`);
+            if (attempt < 3) await sleep(5000);
+        }
+    }
+
+    if (!homeLoaded) {
+        emitLog("❌ Impossible de charger la page d'accueil après 3 tentatives. Abandon.");
+        throw new Error("Failed to navigate to x.com/home after 3 attempts");
+    }
+
+    await sleep(randomRange(2000, 4000));
+    await dismissPopups(page, emitLog);
     
     try {
         // Wait for page to fully load
@@ -1364,36 +1450,52 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
             }
         }
         
-        // Strategy 3: Navigate directly to compose page (or community compose)
+        // Strategy 3: Navigate directly to compose page (or community compose) — with retry
         if (!composed) {
-            try {
-                const composeUrl = config?.communityUrl 
-                    ? `${config.communityUrl.replace(/\/$/, '')}/compose` 
-                    : 'https://x.com/compose/post';
-                
-                emitLog(`🌐 Navigating to ${config?.communityUrl ? 'community ' : ''}compose page...`);
-                await page.goto(composeUrl, { waitUntil: 'networkidle', timeout: 15000 });
-                await sleep(3000);
-                
-                const textArea = page.locator('[data-testid="tweetTextarea_0"]').first();
-                if (await textArea.isVisible({ timeout: 5000 }).catch(() => false)) {
-                    composed = true;
-                    emitLog("✅ Compose page loaded");
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    const composeUrl = config?.communityUrl 
+                        ? `${config.communityUrl.replace(/\/$/, '')}/compose` 
+                        : 'https://x.com/compose/post';
+                    
+                    if (attempt === 1) emitLog(`🌐 Navigation vers la page de composition...`);
+                    else emitLog(`🔄 Tentative ${attempt}/3 pour la page compose...`);
+                    await page.goto(composeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                    await sleep(3000);
+                    
+                    const textArea = page.locator('[data-testid="tweetTextarea_0"]').first();
+                    if (await textArea.isVisible({ timeout: 7000 }).catch(() => false)) {
+                        composed = true;
+                        emitLog("✅ Page compose chargée !");
+                        break;
+                    } else {
+                        emitLog(`⚠️ Page composée chargée mais zone de texte absente (tentative ${attempt}/3).`);
+                    }
+                } catch (e: any) {
+                    emitLog(`⚠️ Navigation compose échouée (tentative ${attempt}/3): ${e.message.split('\n')[0]}`);
+                    if (attempt < 3) await sleep(5000);
                 }
-            } catch (e) {
-                emitLog("⚠️ Direct navigation failed");
             }
         }
         
         if (!composed) {
-            emitLog("❌ Could not open compose dialog");
-            return;
+            emitLog("❌ Impossible d'ouvrir la fenêtre de composition après toutes les tentatives.");
+            throw new Error("Could not open compose dialog — BullMQ will retry this job");
         }
         
         await sleep(randomRange(1000, 2000));
         
         // Prepare tweet content
         let tweetContent = config?.content || AUTO_TWEETS[randomRange(0, AUTO_TWEETS.length - 1)];
+        
+        // ── Anti-duplicate spin ──────────────────────────────────────────────
+        // X rejects identical content posted twice. We add a tiny invisible
+        // Unicode variation + a random thematic flair so each post is unique.
+        const SPIN_EMOJIS = ['✨', '🔥', '💫', '🌙', '💎', '🌸', '⚡', '🎯', '💖', '🚀', '👑', '🌟'];
+        const spinEmoji = SPIN_EMOJIS[Math.floor(Math.random() * SPIN_EMOJIS.length)];
+        // Append a zero-width variation selector (invisible) + emoji
+        tweetContent = tweetContent.trimEnd() + ' ' + spinEmoji;
+        // ──────────────────────────────────────────────────────────────────────
         
         // Add OnlyFans link if configured
         if (config?.onlyfansUrl) {
@@ -1453,41 +1555,67 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
             await sleep(randomRange(3000, 5000));
             emitLog("✅ Tweet published successfully!");
         
-            // Try to get the post URL by visiting the profile
-            await sleep(2000);
-            await page.goto(`https://x.com/${username}`, { waitUntil: 'networkidle', timeout: 30000 });
-            await sleep(3000);
+            // ── URL Capture: Profile → Click first tweet → read address bar ─────
+            let postUrl: string | null = null;
+            emitLog("🔍 Navigation vers le profil pour trouver le post...");
             
-            const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
-            if (await firstTweetLink.isVisible({ timeout: 5000 }).catch(() => false)) {
-                const href = await firstTweetLink.getAttribute('href');
-                if (href) {
-                    const postUrl = `https://x.com${href}`;
-                    emitLog(`🔗 Post URL found: ${postUrl}`);
+            try {
+                await page.goto(`https://x.com/${username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await sleep(3000);
+                
+                // Find the first tweet article that has a timestamp link (most recent post)
+                const firstTweetTimestamp = page.locator('article[data-testid="tweet"] time').first();
+                const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
+                
+                if (await firstTweetLink.isVisible({ timeout: 8000 }).catch(() => false)) {
+                    emitLog("🖱️ Clic sur le premier tweet pour obtenir son lien permanent...");
                     
-                    // NEW: Save to database so spammers can react!
-                    try {
-                        const account = await prisma.twitterAccount.findUnique({ where: { username } });
-                        if (account) {
-                            await prisma.twitterPost.create({
-                                data: {
-                                    accountId: account.id,
-                                    content: tweetContent,
-                                    postUrl: postUrl,
-                                    status: 'PUBLISHED',
-                                    publishedAt: new Date(),
-                                    scheduleDate: new Date(), // Immediate post
-                                },
-                            });
-                            emitLog("✅ Post enregistré en base de données pour orchestration.");
-                        }
-                    } catch (dbErr: any) {
-                        emitLog(`⚠️ Erreur enregistrement post: ${dbErr.message}`);
+                    // Click the timestamp/link, which navigates to the tweet permalink
+                    await firstTweetTimestamp.click().catch(async () => {
+                        await firstTweetLink.click();
+                    });
+                    
+                    // Wait for navigation to the individual tweet page
+                    await page.waitForURL('**x.com/**/status/**', { timeout: 15000 }).catch(() => {});
+                    await sleep(1500);
+                    
+                    // Read the URL directly from the browser address bar
+                    const currentUrl = page.url();
+                    if (currentUrl.includes('/status/')) {
+                        postUrl = currentUrl;
+                        emitLog(`✅ URL récupérée depuis la barre d'adresse: ${postUrl}`);
                     }
-
-                    return { success: true, postUrl };
                 }
+            } catch (urlErr: any) {
+                emitLog(`⚠️ Impossible de récupérer l'URL du post: ${urlErr.message.split('\n')[0]}`);
             }
+            // ──────────────────────────────────────────────────────────────────────
+            
+            if (postUrl) {
+                try {
+                    const account = await prisma.twitterAccount.findUnique({ where: { username } });
+                    if (account) {
+                        await prisma.twitterPost.create({
+                            data: {
+                                accountId: account.id,
+                                content: tweetContent,
+                                postUrl: postUrl,
+                                status: 'PUBLISHED',
+                                publishedAt: new Date(),
+                                scheduleDate: new Date(),
+                            },
+                        });
+                        emitLog("✅ Post URL enregistrée — les bots Spammers vont réagir !");
+                    }
+                } catch (dbErr: any) {
+                    emitLog(`⚠️ Erreur enregistrement post: ${dbErr.message}`);
+                }
+                return { success: true, postUrl };
+            } else {
+                emitLog("⚠️ URL non récupérée — le post a quand même été publié.");
+                return { success: true, postUrl: null };
+            }
+
         } else {
             emitLog("⚠️ Tweet button not found or disabled");
             // Try posting with Enter key
@@ -1495,37 +1623,49 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
             await sleep(5000);
             emitLog("✅ Posted with keyboard shortcut");
             
-            // Extract URL same way
-            await page.goto(`https://x.com/${username}`, { waitUntil: 'networkidle', timeout: 30000 });
-            const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
-            if (await firstTweetLink.isVisible().catch(() => false)) {
-                const href = await firstTweetLink.getAttribute('href');
-                if (href) {
-                    const postUrl = `https://x.com${href}`;
-                    emitLog(`🔗 Post URL found (shortcut): ${postUrl}`);
-
-                    // NEW: Save to database
-                    try {
-                        const account = await prisma.twitterAccount.findUnique({ where: { username } });
-                        if (account) {
-                            await prisma.twitterPost.create({
-                                data: {
-                                    accountId: account.id,
-                                    content: tweetContent,
-                                    postUrl: postUrl,
-                                    status: 'PUBLISHED',
-                                    publishedAt: new Date(),
-                                    scheduleDate: new Date(),
-                                },
-                            });
-                            emitLog("✅ Post enregistré en base de données (shortcut).");
-                        }
-                    } catch (dbErr: any) {
-                        emitLog(`⚠️ Erreur enregistrement post (shortcut): ${dbErr.message}`);
+            // ── URL Capture: Profile → Click first tweet → read address bar ─────
+            let postUrl2: string | null = null;
+            emitLog("🔍 Navigation vers le profil pour trouver le post (shortcut)...");
+            try {
+                await page.goto(`https://x.com/${username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await sleep(3000);
+                const firstTweetTimestamp = page.locator('article[data-testid="tweet"] time').first();
+                const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
+                if (await firstTweetLink.isVisible({ timeout: 8000 }).catch(() => false)) {
+                    emitLog("🖱️ Clic sur le premier tweet pour obtenir son lien permanent...");
+                    await firstTweetTimestamp.click().catch(async () => { await firstTweetLink.click(); });
+                    await page.waitForURL('**x.com/**/status/**', { timeout: 15000 }).catch(() => {});
+                    await sleep(1500);
+                    const currentUrl = page.url();
+                    if (currentUrl.includes('/status/')) {
+                        postUrl2 = currentUrl;
+                        emitLog(`✅ URL récupérée depuis la barre d'adresse: ${postUrl2}`);
                     }
-
-                    return { success: true, postUrl };
                 }
+            } catch (urlErr: any) {
+                emitLog(`⚠️ Erreur capture URL (shortcut): ${urlErr.message.split('\n')[0]}`);
+            }
+
+            if (postUrl2) {
+                try {
+                    const account2 = await prisma.twitterAccount.findUnique({ where: { username } });
+                    if (account2) {
+                        await prisma.twitterPost.create({
+                            data: {
+                                accountId: account2.id,
+                                content: tweetContent,
+                                postUrl: postUrl2,
+                                status: 'PUBLISHED',
+                                publishedAt: new Date(),
+                                scheduleDate: new Date(),
+                            },
+                        });
+                        emitLog("✅ Post URL enregistrée — les bots Spammers vont réagir !");
+                    }
+                } catch (dbErr: any) {
+                    emitLog(`⚠️ Erreur enregistrement post (shortcut): ${dbErr.message}`);
+                }
+                return { success: true, postUrl: postUrl2 };
             }
         }
         
@@ -1638,7 +1778,7 @@ async function doScheduledPost(page: Page, emitLog: (msg: string) => void, postI
             
             // Try to get the post URL by visiting the profile
             await sleep(2000);
-            await page.goto(`https://x.com/${username}`, { waitUntil: 'networkidle', timeout: 30000 });
+            await page.goto(`https://x.com/${username}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
             await sleep(3000);
             
             const firstTweetLink = page.locator('article[data-testid="tweet"] a[href*="/status/"]').first();
@@ -1804,7 +1944,7 @@ export const twitterWorkerHandler = async (job: any) => {
 
     const username = account.username;
     const emitLog = (msg: string) => {
-        console.log(`[${username}] ${msg}`);
+        debugLog(`[${username}] ${msg}`);
         socket.emit('worker_log', { username, message: msg });
     };
 
@@ -1921,6 +2061,9 @@ export const twitterWorkerHandler = async (job: any) => {
             throw new Error("Cookies invalides ou manquants - Mise à jour requise");
         }
 
+        // Dismiss any initial popups (Got it, etc.)
+        await dismissPopups(page, emitLog);
+        
         // ── Execute action ──
         emitLog(`⚡ Exécution de l'action : ${action}`);
         switch (action) {
@@ -1961,7 +2104,7 @@ export const twitterWorkerHandler = async (job: any) => {
                 }
                 break;
             case 'spamComments':
-                await doAutoComment(page, emitLog, { count: config?.count || 5 });
+                await doAutoComment(page, emitLog, { ...config, count: config?.count || 5 });
                 break;
             case 'postCommunity':
                 const communityPostResult = await doAutoPost(page, emitLog, config, username);

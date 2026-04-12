@@ -1226,6 +1226,50 @@ app.patch('/api/campaigns/:id', authenticateToken, async (req: AuthRequest, res)
 });
 
 /**
+ * Toggle Campaign and update interval settings
+ */
+app.post('/api/campaigns/:id/toggle', authenticateToken, async (req: AuthRequest, res) => {
+    const { id } = req.params;
+    const { isActive, intervalValue, intervalUnit } = req.body;
+    const userId = req.user?.id;
+
+    if (!userId) return res.status(401).json({ error: 'Non authentifié' });
+
+    try {
+        const campaign = await prisma.campaign.findFirst({
+            where: { id, userId }
+        });
+        if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+
+        // Update campaign settings
+        const updatedCampaign = await prisma.campaign.update({
+            where: { id },
+            data: { 
+                isActive,
+                ...(intervalValue !== undefined && { postIntervalValue: parseInt(intervalValue, 10) }),
+                ...(intervalUnit !== undefined && { postIntervalUnit: intervalUnit })
+            }
+        });
+
+        // Toggle accounts in this group
+        if (updatedCampaign.groupId) {
+             await prisma.twitterAccount.updateMany({
+                 where: { groupId: updatedCampaign.groupId },
+                 data: { autoMode: isActive }
+             });
+        }
+
+        if (isActive) {
+             startOrchestrator();
+        }
+
+        res.json(updatedCampaign);
+    } catch (error: any) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
+/**
  * Master Play/Pause: Toggle Auto-Mode for all accounts
  */
 app.post('/api/orchestrator/toggle-all', authenticateToken, async (req: AuthRequest, res) => {
@@ -1292,6 +1336,21 @@ app.post('/api/campaigns/:id/content', upload.array('mediaFiles'), async (req: a
 });
 
 /**
+ * Delete content from a campaign
+ */
+app.delete('/api/campaigns/content/:contentId', async (req: any, res) => {
+    const { contentId } = req.params;
+    try {
+        const existing = await prisma.campaignContent.findUnique({ where: { id: contentId } });
+        if (!existing) return res.status(404).json({ error: 'Content not found' });
+        await prisma.campaignContent.delete({ where: { id: contentId } });
+        res.json({ success: true });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+/**
  * Toggle account Auto-Mode
  */
 app.patch('/api/twitter-accounts/:id/auto-mode', async (req, res) => {
@@ -1348,9 +1407,19 @@ io.on('connection', (socket) => {
     console.log('🔌 Client connected:', socket.id);
     
     // Forward worker events to UI
-    socket.on('worker_log', (data) => io.emit('ui_log', data));
-    socket.on('worker_screenshot', (data) => io.emit('ui_screenshot', data));
-    socket.on('worker_state', (data) => io.emit('ui_state', data));
+    socket.on('worker_log', (data) => {
+        console.log(`[Worker Log Received]`, data);
+        io.emit('ui_log', data);
+    });
+    socket.on('worker_screenshot', (data) => {
+        // Log screenshots briefly to avoid terminal spam
+        if (Math.random() > 0.9) console.log(`[Worker Screenshot] from ${data.username}`);
+        io.emit('ui_screenshot', data);
+    });
+    socket.on('worker_state', (data) => {
+        console.log(`[Worker State Update]`, data);
+        io.emit('ui_state', data);
+    });
     
     // Handle notification events
     socket.on('job_completed', async (data) => {
@@ -1403,6 +1472,16 @@ io.on('connection', (socket) => {
             if (postActions.includes(data.action) && data.postUrl && account && account.type === 'MAIN') {
                 console.log(`📣 Orchestration: Post detected from ${account.username}. Triggering support engagement...`);
                 
+                // IMPORTANT: Check if there is an active campaign for this group
+                const activeCampaign = await prisma.campaign.findFirst({
+                    where: { groupId: account.groupId, isActive: true }
+                });
+
+                if (!activeCampaign) {
+                    console.log(`ℹ️ Orchestration skipped: No active campaign for group ${account.groupId}`);
+                    return;
+                }
+
                 // Find ALL support accounts for this user (Global Support Pool)
                 const supportAccounts = await prisma.twitterAccount.findMany({
                     where: {
@@ -1419,8 +1498,8 @@ io.on('connection', (socket) => {
                     
                     for (let i = 0; i < supportAccounts.length; i++) {
                         const support = supportAccounts[i];
-                        // Stagger engagement: 10-40 minutes random delay per account
-                        const delay = (10 + Math.random() * 30) * 60 * 1000;
+                        // Stagger engagement: 1-3 minutes random delay per account
+                        const delay = (1 + Math.random() * 2) * 60 * 1000;
                         
                         // Queue Auto-Like
                         await twitterQueue.add(
@@ -1436,8 +1515,8 @@ io.on('connection', (socket) => {
                             { delay: Math.floor(delay), attempts: 2 }
                         );
 
-                        // Queue Auto-Comment (optional, 50% chance)
-                        if (Math.random() > 0.5) {
+                        // Queue Auto-Comment (Guarantee 100% engagement)
+                        if (true) {
                             await twitterQueue.add(
                                 `orchestration-comment-${support.username}-${Date.now()}`,
                                 {
@@ -1445,7 +1524,7 @@ io.on('connection', (socket) => {
                                     action: 'autoComment',
                                     config: {
                                         url: data.postUrl,
-                                        content: "Great content! Keep it up 🔥", 
+                                        comments: [ "Great content! Keep it up 🔥" ], 
                                         count: 1
                                     }
                                 },

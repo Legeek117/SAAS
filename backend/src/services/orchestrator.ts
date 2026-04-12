@@ -75,28 +75,14 @@ export const startOrchestrator = () => {
     }
     isOrchestratorRunning = true;
     executeGlobalCycle();
-    cron.schedule('*/15 * * * *', executeGlobalCycle);
+    cron.schedule('* * * * *', executeGlobalCycle);
     console.log('✅ Global Orchestrator initialized and listening.');
 };
 
 async function handleMainAutomation(account: any, campaign: any) {
     try {
-        let settings = await prisma.globalSettings.findUnique({
-            where: { userId: account.userId }
-        });
-
-        // Fallback to default if not configured
-        if (!settings) {
-            settings = {
-                id: 'default',
-                userId: account.userId,
-                postIntervalValue: 30,
-                postIntervalUnit: 'MINUTES',
-                commentsPerPostLimit: 5,
-                createdAt: new Date(),
-                updatedAt: new Date()
-            };
-        }
+// We no longer rely on Global Settings for interval.
+        // We use campaign.postIntervalValue directly.
 
         const lastPost = await prisma.twitterPost.findFirst({
             where: { accountId: account.id, status: 'PUBLISHED' },
@@ -109,9 +95,9 @@ async function handleMainAutomation(account: any, campaign: any) {
             const lastPostTime = new Date(lastPost.createdAt);
             const diffMs = now.getTime() - lastPostTime.getTime();
             
-            const intervalMs = settings.postIntervalUnit === 'HOURS' 
-                ? settings.postIntervalValue * 60 * 60 * 1000 
-                : settings.postIntervalValue * 60 * 1000;
+            const intervalMs = campaign.postIntervalUnit === 'HOURS' 
+                ? campaign.postIntervalValue * 60 * 60 * 1000 
+                : campaign.postIntervalValue * 60 * 1000;
 
             if (diffMs < intervalMs) {
                 canPost = false;
@@ -170,43 +156,38 @@ async function handleSupportAutomation(account: any) {
             const reactionRoll = Math.random();
             const username = account.username;
 
-            if (reactionRoll < 0.40) {
+            if (reactionRoll < 0.15) {
                 console.log(`❤️ Orchestrator: Support ${username} -> Liking ${latestMainPost.postUrl}`);
                 await twitterQueue.add(`support-like-${username}-${Date.now()}`, {
                     accountId: account.id,
                     action: 'autoLike',
                     username,
                     config: { url: latestMainPost.postUrl }
-                });
-            } else if (reactionRoll < 0.70) {
+                }, { attempts: 3, backoff: { type: 'exponential', delay: 15000 } });
+            } else if (reactionRoll < 0.30) {
                 console.log(`🔁 Orchestrator: Support ${username} -> Retweeting ${latestMainPost.postUrl}`);
                 await twitterQueue.add(`support-retweet-${username}-${Date.now()}`, {
                     accountId: account.id,
                     action: 'autoRetweet',
                     username,
                     config: { url: latestMainPost.postUrl }
-                });
-            } else {
-                console.log(`💬 Orchestrator: Support ${username} -> Commenting on ${latestMainPost.postUrl}`);
+                }, { attempts: 3, backoff: { type: 'exponential', delay: 15000 } });
+            } else { // Always comment for remaining support accounts
+                const commentCount = Math.floor(Math.random() * 3) + 2; // 2 to 4 comments
+                console.log(`💬 Orchestrator: Support ${username} -> Commenting ${commentCount} times on ${latestMainPost.postUrl}`);
                 await twitterQueue.add(`support-comment-${username}-${Date.now()}`, {
                     accountId: account.id,
-                    action: 'spamComments',
+                    action: 'autoComment',
                     username,
                     config: { 
                         url: latestMainPost.postUrl,
-                        count: 1 
+                        comments: [ "🔥", "🚀", "Totalement incroyable !", "Je valide !" ],
+                        count: commentCount 
                     }
-                });
+                }, { attempts: 3, backoff: { type: 'exponential', delay: 15000 } });
             }
         } 
-        // 15% chance for a random warmup if no reaction or roll failed
-        else if (roll < 0.15) {
-            await twitterQueue.add(`auto-warmup-support-${account.username}-${Date.now()}`, {
-                accountId: account.id,
-                action: 'warmUp',
-                username: account.username
-            });
-        }
+        // No fallback for SUPPORT accounts to avoid background noise
     } catch (error) {
         console.error(`❌ Error in handleSupportAutomation for ${account.username}:`, error);
     }
@@ -244,7 +225,7 @@ async function triggerCampaignPost(account: any, campaign: any) {
                 linkUrl: content.linkUrl,
                 communityUrl: targetCommunity
             }
-        });
+        }, { attempts: 3, backoff: { type: 'exponential', delay: 15000 } });
 
         await prisma.campaignContent.update({
             where: { id: content.id },

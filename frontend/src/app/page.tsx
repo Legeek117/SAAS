@@ -228,6 +228,11 @@ export default function Dashboard() {
     const [user, setUser] = useState<any>(null);
     const [token, setToken] = useState<string | null>(null);
 
+    // Launch Modal State
+    const [showLaunchModal, setShowLaunchModal] = useState(false);
+    const [selectedLaunchCampaign, setSelectedLaunchCampaign] = useState<string | null>(null);
+    const [launchInterval, setLaunchInterval] = useState({ value: 30, unit: 'MINUTES' });
+
     useEffect(() => {
         const storedToken = localStorage.getItem('ghost_token');
         const storedUser = localStorage.getItem('ghost_user');
@@ -968,33 +973,7 @@ export default function Dashboard() {
                     </div>
 
                     <div className="flex items-center gap-4">
-                        {platform === 'TWITTER' && (
-                            <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={async () => {
-                                    const newState = !isMasterAutoOn;
-                                    try {
-                                        await axios.post(`${API_BASE}/orchestrator/toggle-all`, 
-                                            { autoMode: newState },
-                                            { headers: { 'Authorization': `Bearer ${token}` }}
-                                        );
-                                        setIsMasterAutoOn(newState);
-                                        fetchAccounts(platform);
-                                    } catch (err) {
-                                        console.error('Master toggle error', err);
-                                    }
-                                }}
-                                className={`px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 transition-all border ${
-                                    isMasterAutoOn 
-                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
-                                    : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                                }`}
-                            >
-                                {isMasterAutoOn ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-                                {isMasterAutoOn ? 'STOP ALL BOT' : 'PLAY ALL BOT'}
-                            </motion.button>
-                        )}
+
                         <button className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all text-sm font-medium text-white/70 hover:text-white">
                             <RefreshCw size={16} /> Sync
                         </button>
@@ -1573,20 +1552,49 @@ export default function Dashboard() {
                                     {campaigns.map(c => (
                                         <div 
                                             key={c.id}
-                                            onClick={() => setSelectedCampaign(c)}
-                                            className={`p-6 rounded-2xl border cursor-pointer transition-all ${
+                                            className={`p-6 rounded-2xl border transition-all ${
                                                 selectedCampaign?.id === c.id 
                                                 ? 'bg-blue-600/10 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.15)] text-white' 
                                                 : 'bg-white/5 border-white/10 hover:border-white/20 text-white/60'
                                             }`}
                                         >
-                                            <div className="flex justify-between items-start">
+                                            <div className="flex justify-between items-start cursor-pointer" onClick={() => setSelectedCampaign(c)}>
                                                 <div>
                                                     <h3 className="font-bold text-lg">{c.name}</h3>
                                                     <p className="text-sm text-gray-500 mt-1">{c.contents?.length || 0} items de contenu</p>
                                                     {c.groupId && <p className="text-[10px] text-blue-400 mt-1 uppercase font-semibold">Group: {c.groupId}</p>}
                                                 </div>
-                                                {c.isActive && <span className="px-2 py-1 bg-green-500/10 text-green-500 text-[10px] rounded-full border border-green-500/20">ACTIVE</span>}
+                                                <div className="flex flex-col items-end gap-2">
+                                                    {c.isActive && <span className="px-2 py-1 bg-green-500/10 text-green-500 text-[10px] rounded-full border border-green-500/20">ACTIVE</span>}
+                                                </div>
+                                            </div>
+                                            <div className="mt-4 pt-4 border-t border-white/10 flex justify-end">
+                                                {c.isActive ? (
+                                                    <button 
+                                                        onClick={async (e) => {
+                                                            e.stopPropagation();
+                                                            try {
+                                                                await axios.post(`${API_BASE}/campaigns/${c.id}/toggle`, { isActive: false }, { headers: { 'Authorization': `Bearer ${token}` }});
+                                                                fetchCampaigns();
+                                                                fetchAccounts(platform);
+                                                            } catch (err) { console.error(err); }
+                                                        }}
+                                                        className="px-4 py-2 bg-rose-500/10 text-rose-500 border border-rose-500/20 hover:bg-rose-500/20 rounded-lg text-sm font-bold flex items-center gap-2"
+                                                    >
+                                                        <Pause size={14} fill="currentColor" /> Mettre en pause
+                                                    </button>
+                                                ) : (
+                                                    <button 
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedLaunchCampaign(c.id);
+                                                            setShowLaunchModal(true);
+                                                        }}
+                                                        className="px-4 py-2 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20 rounded-lg text-sm font-bold flex items-center gap-2"
+                                                    >
+                                                        <Play size={14} fill="currentColor" /> Lancer les Bots
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -1713,7 +1721,20 @@ export default function Dashboard() {
                                                             )}
                                                             <div className="mt-4 flex justify-between items-center">
                                                                 <span className="text-[10px] text-gray-600 uppercase tracking-widest font-bold">Utilisé {item.usedCount} fois</span>
-                                                                <button className="text-red-500/50 hover:text-red-500 p-2 rounded-lg hover:bg-red-500/10 transition-all">
+                                                                <button 
+                                                                    className="text-red-500/50 hover:text-red-500 p-2 rounded-lg hover:bg-red-500/10 transition-all"
+                                                                    onClick={async () => {
+                                                                        if (!confirm('Supprimer ce contenu ?')) return;
+                                                                        try {
+                                                                            await axios.delete(`${API_BASE}/campaigns/content/${item.id}`, {
+                                                                                headers: { 'Authorization': `Bearer ${token}` }
+                                                                            });
+                                                                            fetchCampaigns();
+                                                                        } catch (err: any) {
+                                                                            alert('Erreur suppression: ' + (err.response?.data?.error || err.message));
+                                                                        }
+                                                                    }}
+                                                                >
                                                                     <Trash2 size={16} />
                                                                 </button>
                                                             </div>
@@ -2276,6 +2297,86 @@ export default function Dashboard() {
                                 </motion.button>
                             </div>
                         </motion.form>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Launch Campaign Modal */}
+            <AnimatePresence>
+                {showLaunchModal && selectedLaunchCampaign && (
+                    <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+                        onClick={() => setShowLaunchModal(false)}
+                    >
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="relative bg-[#0f0f11] border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl"
+                            onClick={e => e.stopPropagation()}
+                        >
+                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-white">
+                                <Play className="text-emerald-400" /> Paramètres de Lancement
+                            </h2>
+                            <p className="text-sm text-white/50 mb-6">
+                                Choisissez la fréquence à laquelle vos bots vont publier les posts de cette campagne.
+                            </p>
+
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-xs uppercase tracking-wider font-semibold text-white/40 mb-2">Fréquence de publication</label>
+                                    <div className="flex gap-4">
+                                        <input 
+                                            type="number" 
+                                            min="1"
+                                            value={launchInterval.value}
+                                            onChange={e => setLaunchInterval(prev => ({...prev, value: parseInt(e.target.value)}))}
+                                            className="w-1/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500"
+                                        />
+                                        <select 
+                                            value={launchInterval.unit}
+                                            onChange={e => setLaunchInterval(prev => ({...prev, unit: e.target.value}))}
+                                            className="w-2/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 appearance-none"
+                                        >
+                                            <option value="MINUTES">Minutes</option>
+                                            <option value="HOURS">Heures</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex gap-4 pt-4 border-t border-white/10">
+                                    <button
+                                        onClick={() => setShowLaunchModal(false)}
+                                        className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl font-medium transition-colors"
+                                    >
+                                        Annuler
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                await axios.post(`${API_BASE}/campaigns/${selectedLaunchCampaign}/toggle`, {
+                                                    isActive: true,
+                                                    intervalValue: launchInterval.value,
+                                                    intervalUnit: launchInterval.unit
+                                                }, { headers: { 'Authorization': `Bearer ${token}` }});
+                                                setShowLaunchModal(false);
+                                                fetchCampaigns();
+                                                fetchAccounts(platform);
+                                                alert("✅ Campagne lancée avec succès ! Les bots s'activent.");
+                                            } catch (err) {
+                                                console.error(err);
+                                                alert('❌ Erreur lors du lancement');
+                                            }
+                                        }}
+                                        className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold transition-colors"
+                                    >
+                                        Confirmer & Lancer
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
                     </motion.div>
                 )}
             </AnimatePresence>

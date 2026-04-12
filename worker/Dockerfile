@@ -38,4 +38,4 @@ COPY . .
 # Generate Prisma Client
 RUN npx prisma generate
 
-CMD ["npm", "run", "dev"]
+CMD ["xvfb-run", "--server-args=-screen 0 1280x1024x24", "npm", "run", "dev"]

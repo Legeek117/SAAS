@@ -6,24 +6,40 @@ import stealth from 'puppeteer-extra-plugin-stealth';
 import { PrismaClient } from '@prisma/client';
 import { io } from 'socket.io-client';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 import { twitterScheduler } from './utils/scheduler';
 
 dotenv.config();
 
+const logFile = path.join(process.cwd(), 'worker_debug.log');
+const debugLog = (msg: string) => {
+    try {
+        const entry = `[${new Date().toISOString()}] ${msg}\n`;
+        fs.appendFileSync(logFile, entry);
+    } catch (e: any) {
+        console.error(`Failed to write to ${logFile}: ${e.message}`);
+    }
+    console.log(msg);
+};
+
+const HEADLESS = false;
 const prisma = new PrismaClient();
 const socket = io(process.env.BACKEND_SOCKET_URL || 'http://saas-backend:4000');
 
+debugLog("👷 Worker starting up...");
+
 // Log socket connection status
 socket.on('connect', () => {
-    console.log(`✅ Socket connected to backend: ${socket.id}`);
+    debugLog(`✅ Socket connected to backend: ${socket.id}`);
 });
 
 socket.on('disconnect', () => {
-    console.log(`❌ Socket disconnected from backend`);
+    debugLog(`❌ Socket disconnected from backend`);
 });
 
 socket.on('connect_error', (error) => {
-    console.error(`❌ Socket connection error: ${error.message}`);
+    debugLog(`❌ Socket connection error: ${error.message}`);
 });
 
 chromium.use(stealth());
@@ -123,7 +139,7 @@ const worker = new Worker(
         } : undefined;
 
         const browser = await chromium.launch({
-            headless: false, // On met à false pour voir la fenêtre si besoin
+            headless: HEADLESS,
             // channel: 'chrome',
             proxy: proxyConfig,
             args: [
@@ -164,7 +180,14 @@ const worker = new Worker(
             try {
                 const screenshot = await page.screenshot({ type: 'jpeg', quality: 30 });
                 socket.emit('worker_screenshot', { username, image: screenshot.toString('base64') });
-            } catch (e) { }
+            } catch (e: any) {
+                // If it's a "Target closed" error, just stop the interval
+                if (e.message.includes('closed')) {
+                    clearInterval(screenshotInterval);
+                } else {
+                    debugLog(`⚠️ Screenshot fail for ${username}: ${e.message}`);
+                }
+            }
         }, 4000);
 
         try {
@@ -214,20 +237,20 @@ const twitterWorker = new Worker(
 );
 
 twitterWorker.on('ready', () => {
-    console.log('✅ Twitter Worker is successfully connected to Redis and ready for jobs!');
+    debugLog('✅ Twitter Worker is successfully connected to Redis and ready for jobs!');
     
     // Start the automatic scheduler for Twitter actions
     twitterScheduler.start().catch(err => {
-        console.error('Failed to start scheduler:', err);
+        debugLog(`❌ Failed to start scheduler: ${err.message}`);
     });
 });
 
 twitterWorker.on('active', (job) => {
-    console.log(`🚀 Job ${job.id} started. Action: ${job.data.action}`);
+    debugLog(`🚀 Job ${job.id} started. Action: ${job.data.action}`);
 });
 
 twitterWorker.on('completed', async (job) => {
-    console.log(`🏁 Job ${job.id} finished successfully.`);
+    debugLog(`🏁 Job ${job.id} finished successfully.`);
     
     // Emit notification to backend
     try {
@@ -241,13 +264,13 @@ twitterWorker.on('completed', async (job) => {
             groupName: job.data.groupName,
             postUrl: job.data.postUrl
         });
-    } catch (error) {
-        console.error('Error emitting job_completed:', error);
+    } catch (error: any) {
+        debugLog(`❌ Error emitting job_completed: ${error.message}`);
     }
 });
 
 twitterWorker.on('failed', async (job, err) => {
-    console.error(`❌ Job ${job?.id} failed with error:`, err.message);
+    debugLog(`❌ Job ${job?.id} failed with error: ${err.message}`);
     
     // Emit notification to backend
     try {
@@ -261,8 +284,8 @@ twitterWorker.on('failed', async (job, err) => {
             groupId: job?.data.groupId,
             groupName: job?.data.groupName
         });
-    } catch (error) {
-        console.error('Error emitting job_failed:', error);
+    } catch (error: any) {
+        debugLog(`❌ Error emitting job_failed: ${error.message}`);
     }
 });
 
