@@ -8,7 +8,6 @@ import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { authenticateToken, isAdmin, AuthRequest } from './middleware/auth';
@@ -41,23 +40,6 @@ const io = new Server(httpServer, {
 });
 
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-const linkCastStorePath = path.join(__dirname, '..', 'data', 'link-casts.json');
-
-function readLinkCastStore(): Record<string, { imageUrl: string; targetUrl: string; createdAt: string }> {
-    try {
-        if (!fs.existsSync(linkCastStorePath)) return {};
-        const raw = fs.readFileSync(linkCastStorePath, 'utf-8');
-        return raw ? JSON.parse(raw) : {};
-    } catch {
-        return {};
-    }
-}
-
-function writeLinkCastStore(store: Record<string, { imageUrl: string; targetUrl: string; createdAt: string }>) {
-    const dir = path.dirname(linkCastStorePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(linkCastStorePath, JSON.stringify(store, null, 2), 'utf-8');
-}
 
 app.use(cors({
   origin: [frontendUrl, 'http://localhost:3000'],
@@ -1172,13 +1154,15 @@ app.post('/api/link-cast', authenticateToken, async (req: AuthRequest, res) => {
 
     try {
         const slug = Math.random().toString(36).slice(2, 10);
-        const store = readLinkCastStore();
-        store[slug] = {
-            imageUrl,
-            targetUrl,
-            createdAt: new Date().toISOString()
-        };
-        writeLinkCastStore(store);
+        const userId = req.user?.id;
+        await prisma.linkCast.create({
+            data: {
+                slug,
+                imageUrl,
+                targetUrl,
+                ...(userId ? { userId } : {}),
+            },
+        });
         res.status(201).json({ slug, imageUrl, targetUrl });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -1188,10 +1172,14 @@ app.post('/api/link-cast', authenticateToken, async (req: AuthRequest, res) => {
 app.get('/api/link-cast/:slug', async (req, res) => {
     try {
         const { slug } = req.params;
-        const store = readLinkCastStore();
-        const linkCast = store[slug];
-        if (!linkCast) return res.status(404).json({ error: 'Slug introuvable' });
-        res.json({ slug, ...linkCast });
+        const row = await prisma.linkCast.findUnique({ where: { slug } });
+        if (!row) return res.status(404).json({ error: 'Slug introuvable' });
+        res.json({
+            slug: row.slug,
+            imageUrl: row.imageUrl,
+            targetUrl: row.targetUrl,
+            createdAt: row.createdAt.toISOString(),
+        });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }

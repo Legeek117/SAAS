@@ -25,6 +25,7 @@ model User {
   twitterAccounts       TwitterAccount[]
   campaigns             Campaign[]
   settings              GlobalSettings?
+  linkCasts             LinkCast[]
 }
 
 model IGAccount {
@@ -260,6 +261,16 @@ model CampaignContent {
   usedCount       Int      @default(0)
   campaignId      String
   campaign        Campaign @relation(fields: [campaignId], references: [id])
+}
+
+model LinkCast {
+  id        String   @id @default(uuid())
+  slug      String   @unique
+  imageUrl  String
+  targetUrl String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
 }
 
 enum UserRole {
