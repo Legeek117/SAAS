@@ -42,8 +42,10 @@ const io = new Server(httpServer, {
 const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 app.use(cors({
-  origin: [frontendUrl, 'http://localhost:3000'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  origin: [frontendUrl, 'http://localhost:3000', 'https://ghostcontent.vercel.app'].filter(
+    (o, i, a) => o && a.indexOf(o) === i
+  ),
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
 app.use(express.json());
