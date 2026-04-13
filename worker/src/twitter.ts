@@ -821,6 +821,77 @@ async function dismissCommunitiesWelcomeModal(page: Page, emitLog: (msg: string)
 }
 
 /**
+ * Bottom sheet « Choose audience » (Everyone vs communautés) — bloque saisie / bouton Post.
+ */
+async function dismissChooseAudienceSheet(
+    page: Page,
+    emitLog: (msg: string) => void,
+    config?: { communityUrl?: string }
+): Promise<void> {
+    try {
+        const audienceHeading = page
+            .getByText(/Choose audience|Choisir l'audience|Who can see your post/i)
+            .first();
+        const communitiesSection = page
+            .getByText(/^My Communities$/i)
+            .or(page.getByText(/^Mes communautés$/i))
+            .first();
+        const everyoneLabel = page.getByText(/^Everyone$/i).or(page.getByText(/^Tout le monde$/i)).first();
+
+        const hasSheet =
+            (await audienceHeading.isVisible({ timeout: 1200 }).catch(() => false)) ||
+            ((await communitiesSection.isVisible({ timeout: 500 }).catch(() => false)) &&
+                (await everyoneLabel.isVisible({ timeout: 500 }).catch(() => false)));
+
+        if (!hasSheet) return;
+
+        emitLog('💡 Feuille « Choose audience » détectée — fermeture / confirmation…');
+
+        const communityUrl = config?.communityUrl;
+        if (communityUrl) {
+            const cid = extractCommunityId(String(communityUrl));
+            if (cid) {
+                const commRow = page.locator(`a[href*="/i/communities/${cid}"]`).first();
+                if (await commRow.isVisible({ timeout: 2200 }).catch(() => false)) {
+                    emitLog('💡 Audience — sélection de la communauté configurée…');
+                    await humanClick(page, commRow);
+                    await sleep(randomRange(900, 1600));
+                    await page.keyboard.press('Escape');
+                    await sleep(randomRange(400, 800));
+                    return;
+                }
+            }
+        }
+
+        const everyoneControl = page
+            .getByRole('button', { name: /^Everyone$/i })
+            .or(page.getByRole('button', { name: /^Tout le monde$/i }))
+            .or(page.getByRole('menuitem', { name: /Everyone|Tout le monde/i }))
+            .first();
+
+        if (await everyoneControl.isVisible({ timeout: 2200 }).catch(() => false)) {
+            await humanClick(page, everyoneControl);
+            await sleep(randomRange(700, 1400));
+        }
+
+        for (let i = 0; i < 4; i++) {
+            await page.keyboard.press('Escape');
+            await sleep(320);
+            const headingGone = !(await audienceHeading.isVisible({ timeout: 350 }).catch(() => false));
+            const sectionGone = !(await communitiesSection.isVisible({ timeout: 250 }).catch(() => false));
+            if (headingGone && sectionGone) break;
+        }
+
+        if (await audienceHeading.isVisible({ timeout: 450 }).catch(() => false)) {
+            await page.mouse.click(24, 100).catch(() => {});
+            await sleep(450);
+        }
+    } catch {
+        // optionnel
+    }
+}
+
+/**
  * Dismiss any interstitial popups that may appear (Unlock more on X, etc.)
  */
 async function dismissPopups(page: Page, emitLog: (msg: string) => void): Promise<void> {
@@ -850,6 +921,7 @@ async function dismissPopups(page: Page, emitLog: (msg: string) => void): Promis
 
         await dismissCommunityRulesModal(page, emitLog);
         await dismissCommunitiesWelcomeModal(page, emitLog);
+        await dismissChooseAudienceSheet(page, emitLog);
     } catch (_) {
         // Popups optional — never block execution
     }
@@ -1670,6 +1742,9 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
             emitLog("❌ Impossible d'ouvrir la fenêtre de composition après toutes les tentatives.");
             throw new Error("Could not open compose dialog — BullMQ will retry this job");
         }
+
+        await sleep(randomRange(600, 1200));
+        await dismissChooseAudienceSheet(page, emitLog, { communityUrl: config?.communityUrl });
         
         await sleep(randomRange(1000, 2000));
         
@@ -1734,6 +1809,8 @@ async function doAutoPost(page: Page, emitLog: (msg: string) => void, config: an
                 // For now, let's keep track locally to delete after post
             }
         }
+
+        await dismissChooseAudienceSheet(page, emitLog, { communityUrl: config?.communityUrl });
         
         // Click Tweet button
         const tweetBtn = page.locator('[data-testid="tweetButton"]').first();
@@ -1920,11 +1997,15 @@ async function doScheduledPost(page: Page, emitLog: (msg: string) => void, postI
             return;
         }
 
+        await sleep(randomRange(600, 1200));
+        await dismissChooseAudienceSheet(page, emitLog);
         await sleep(randomRange(1000, 2000));
         
         // Type content
         await humanType(page, 'div[data-testid="tweetTextarea_0"]', post.content);
         await sleep(randomRange(1000, 2000));
+
+        await dismissChooseAudienceSheet(page, emitLog);
 
         // Click Tweet button
         const tweetBtn = page.locator('[data-testid="tweetButton"]').first();

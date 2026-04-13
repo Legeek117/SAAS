@@ -376,7 +376,7 @@ export default function Dashboard() {
         }
         try {
             const { data: updated } = await axios.put(
-                `${API_BASE}/campaigns/${editCampaignForm.id}`,
+                `${API_BASE}/update-campaign/${editCampaignForm.id}`,
                 {
                     name: editCampaignForm.name,
                     description: editCampaignForm.description,
@@ -404,7 +404,7 @@ export default function Dashboard() {
         if (!confirm(`Supprimer la campagne « ${c.name} » et tout son contenu ?`)) return;
         try {
             await axios.post(
-                `${API_BASE}/campaigns/${c.id}/delete`,
+                `${API_BASE}/delete-campaign/${c.id}`,
                 {},
                 { headers: { Authorization: `Bearer ${token}` } }
             );

@@ -1301,8 +1301,18 @@ const handleUpdateCampaign = async (req: AuthRequest, res: express.Response) => 
     const userId = req.user?.id || 'temp-user-id';
     const { name, description, type, postsPerAccount, commentsPerPost, totalCommentsQuota, targetCommunities, isActive } = req.body;
     try {
-        const existing = await prisma.campaign.findFirst({ where: { id, userId } });
-        if (!existing) return res.status(404).json({ error: 'Campagne introuvable' });
+        const existing = await prisma.campaign.findUnique({ where: { id } });
+        if (!existing) {
+            return res.status(404).json({ error: 'Campagne introuvable', code: 'NOT_FOUND' });
+        }
+        const isOwner = existing.userId === userId;
+        const isAdminUser = req.user?.role === UserRole.ADMIN;
+        if (!isOwner && !isAdminUser) {
+            return res.status(403).json({
+                error: 'Cette campagne n’appartient pas à votre compte.',
+                code: 'FORBIDDEN',
+            });
+        }
 
         const campaign = await prisma.campaign.update({
             where: { id },
@@ -1327,6 +1337,9 @@ const handleUpdateCampaign = async (req: AuthRequest, res: express.Response) => 
 };
 app.patch('/api/campaigns/:id', authenticateToken, handleUpdateCampaign);
 app.put('/api/campaigns/:id', authenticateToken, handleUpdateCampaign);
+/** Chemins alternatifs (moins ambigus pour certains reverse-proxy / vieux clients) */
+app.put('/api/update-campaign/:id', authenticateToken, handleUpdateCampaign);
+app.post('/api/update-campaign/:id', authenticateToken, handleUpdateCampaign);
 
 /**
  * Delete a campaign and its content pool (DELETE + POST /delete pour CORS / proxies stricts)
@@ -1335,8 +1348,18 @@ const handleDeleteCampaign = async (req: AuthRequest, res: express.Response) => 
     const { id } = req.params;
     const userId = req.user?.id || 'temp-user-id';
     try {
-        const existing = await prisma.campaign.findFirst({ where: { id, userId } });
-        if (!existing) return res.status(404).json({ error: 'Campagne introuvable' });
+        const existing = await prisma.campaign.findUnique({ where: { id } });
+        if (!existing) {
+            return res.status(404).json({ error: 'Campagne introuvable', code: 'NOT_FOUND' });
+        }
+        const isOwner = existing.userId === userId;
+        const isAdminUser = req.user?.role === UserRole.ADMIN;
+        if (!isOwner && !isAdminUser) {
+            return res.status(403).json({
+                error: 'Cette campagne n’appartient pas à votre compte.',
+                code: 'FORBIDDEN',
+            });
+        }
 
         await prisma.$transaction([
             prisma.campaignContent.deleteMany({ where: { campaignId: id } }),
@@ -1349,6 +1372,7 @@ const handleDeleteCampaign = async (req: AuthRequest, res: express.Response) => 
 };
 app.delete('/api/campaigns/:id', authenticateToken, handleDeleteCampaign);
 app.post('/api/campaigns/:id/delete', authenticateToken, handleDeleteCampaign);
+app.post('/api/delete-campaign/:id', authenticateToken, handleDeleteCampaign);
 
 /**
  * Toggle Campaign and update interval settings
