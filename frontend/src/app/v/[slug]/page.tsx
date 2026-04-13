@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { API_BASE_URL } from '@/utils/apiConfig';
+import { API_BASE_URL } from '../../../utils/apiConfig';
 
 type LinkCastData = {
   slug: string;
