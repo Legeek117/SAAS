@@ -265,7 +265,7 @@ model CampaignContent {
   targetCommunity String?
   usedCount       Int      @default(0)
   campaignId      String
-  campaign        Campaign @relation(fields: [campaignId], references: [id])
+  campaign        Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
 
 model LinkCast {
