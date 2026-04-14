@@ -112,22 +112,9 @@ async function handleMainAutomation(account: any, campaign: any) {
             }
         }
 
-        const roll = Math.random();
-
-        // 90% chance to post if interval passed for higher autonomy
-        if (canPost && roll < 0.90) {
+        // 100% chance to post if interval passed
+        if (canPost) {
             await triggerCampaignPost(account, campaign);
-        } 
-        // 10% chance to join a community if enabled and not posting
-        else if (campaign.targetCommunities && campaign.targetCommunities.length > 0 && roll < 0.10) {
-            const communityUrl = campaign.targetCommunities[Math.floor(Math.random() * campaign.targetCommunities.length)];
-            console.log(`👥 Orchestrator: Scheduling Community Join for ${account.username} -> ${communityUrl}`);
-            await twitterQueue.add(`join-community-${account.username}-${Date.now()}`, {
-                accountId: account.id,
-                action: 'joinCommunity',
-                username: account.username,
-                config: { url: communityUrl }
-            });
         }
     } catch (error) {
         console.error(`❌ Error in handleMainAutomation for ${account.username}:`, error);
