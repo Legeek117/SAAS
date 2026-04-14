@@ -1233,9 +1233,12 @@ const AUTO_COMMENTS = [
 ];
 
 async function doAutoComment(page: Page, emitLog: (msg: string) => void, config: any) {
-    const count = config?.count || randomRange(2, 4);
     const customComments = config?.comments || AUTO_COMMENTS;
-    emitLog(`💬 Leaving ${count} natural comments...`);
+    const shuffleArray = (arr: any[]) => [...arr].sort(() => 0.5 - Math.random());
+    let availableComments = shuffleArray(customComments);
+    const count = Math.min(config?.count || randomRange(2, 4), availableComments.length);
+    
+    emitLog(`💬 Leaving ${count} natural unique comments...`);
     
     // IF specific URL provided (Social Orchestration)
     if (config?.url) {
@@ -1251,7 +1254,9 @@ async function doAutoComment(page: Page, emitLog: (msg: string) => void, config:
                 await sleep(2000);
                 
                 const textArea = '[data-testid="tweetTextarea_0"]';
-                const comment = customComments[randomRange(0, customComments.length - 1)];
+                const comment = availableComments.pop();
+                if (!comment) break;
+                
                 await humanType(page, textArea, comment);
                 await sleep(2000);
                 
@@ -1307,7 +1312,9 @@ async function doAutoComment(page: Page, emitLog: (msg: string) => void, config:
             const ta = page.locator(textArea).first();
             if (await ta.count() === 0) continue;
 
-            const comment = customComments[randomRange(0, customComments.length - 1)];
+            const comment = availableComments.pop();
+            if (!comment) break;
+
             emitLog(`✍️ Commenting: "${comment}"`);
             await humanType(page, textArea, comment);
             await sleep(randomRange(1500, 3000));
