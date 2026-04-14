@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **Run Full Sequence** feature automates all Twitter account setup steps after Warm Up. When triggered, it will automatically execute all actions in sequence with proper delays.
+The **Run Full Sequence** feature automates all Twitter account setup steps. When triggered, it will automatically execute all actions in sequence with proper delays.
 
 ---
 
@@ -10,9 +10,8 @@ The **Run Full Sequence** feature automates all Twitter account setup steps afte
 
 ### Manual Mode (Existing)
 Select individual actions one by one from the dropdown:
-- Day 1: Warm Up
-- Day 2: Setup Profile
-- Day 3: Join Communities
+- Day 1: Setup Profile
+- Day 2: Join Communities
 - Day 3: Post Captions
 - Day 4: Spam Comments
 
@@ -27,11 +26,10 @@ When you click "Run Full Sequence", the following actions are executed automatic
 
 | Step | Action | Delay | Description |
 |------|--------|-------|-------------|
-| 1 | **Warm Up** | Immediate | Natural browsing to warm up the account |
-| 2 | **Setup Profile** | +1 min | Configure profile (bio, niche, images) |
-| 3 | **Join Communities** | +2 min | Join relevant Twitter communities |
-| 4 | **Post Captions** | +3 min | Post content to communities |
-| 5 | **Spam Comments** | +4 min | Add support comments |
+| 1 | **Setup Profile** | Immediate | Configure profile (bio, niche, images) |
+| 2 | **Join Communities** | +1 min | Join relevant Twitter communities |
+| 3 | **Post Captions** | +2 min | Post content to communities |
+| 4 | **Spam Comments** | +3 min | Add support comments |
 
 **Total Duration**: ~10 minutes (with delays between actions)
 
@@ -49,9 +47,8 @@ When you click the Play button (▶️) on a Twitter account, you'll see:
 │ ⚡ Run Full Sequence            │ ← NEW!
 │    All steps automatically      │
 ├─────────────────────────────────┤
-│ Day 1: Warm Up                  │
-│ Day 2: Setup Profile            │
-│ Day 3: Join Communities         │
+│ Day 1: Setup Profile            │
+│ Day 2: Join Communities         │
 │ Day 3: Post Captions            │
 │ Day 4: Spam Comments (Support)  │
 └─────────────────────────────────┘
@@ -78,10 +75,9 @@ The system uses increasing delays to mimic human behavior:
 
 ```javascript
 const delays = [
-    60000,   // 1 minute  (Warm Up → Setup Profile)
-    120000,  // 2 minutes (Setup Profile → Join Communities)
-    180000,  // 3 minutes (Join Communities → Post Captions)
-    240000   // 4 minutes (Post Captions → Spam Comments)
+    60000,   // 1 minute  (Setup Profile → Join Communities)
+    120000,  // 2 minutes (Join Communities → Post Captions)
+    180000,  // 3 minutes (Post Captions → Spam Comments)
 ];
 ```
 
@@ -134,7 +130,7 @@ joinCommunity queued successfully
 ### API Endpoint
 ```
 POST /api/twitter-accounts/:id/action
-Body: { action: "warmUp" | "setupProfile" | ... }
+Body: { action: "setupProfile" | "joinCommunity" | "postCommunity" | "spamComments" | ... }
 ```
 
 ### Worker Execution
@@ -235,7 +231,7 @@ const delays = [120000, 240000, 360000, 480000]; // 2min, 4min, 6min, 8min
 5. Check worker logs for execution details
 
 ### Expected Behavior
-✅ Warm Up starts immediately  
+✅ Setup Profile starts immediately  
 ✅ Progress indicator appears  
 ✅ Each action queues automatically  
 ✅ Progress bar updates  
@@ -248,33 +244,27 @@ const delays = [120000, 240000, 360000, 480000]; // 2min, 4min, 6min, 8min
 ```
 User clicks "Run Full Sequence"
     ↓
-Warm Up executes immediately
+Setup Profile executes immediately
     ↓
-Progress: Step 1/5 - Warm Up
+Progress: Step 1/4 - Setup Profile
     ↓
 [Wait 1 minute]
     ↓
-Setup Profile queues
+Join Communities queues
     ↓
-Progress: Step 2/5 - Setup Profile
+Progress: Step 2/4 - Join Communities
     ↓
 [Wait 2 minutes]
     ↓
-Join Communities queues
+Post Captions queues
     ↓
-Progress: Step 3/5 - Join Communities
+Progress: Step 3/4 - Post Captions
     ↓
 [Wait 3 minutes]
     ↓
-Post Captions queues
-    ↓
-Progress: Step 4/5 - Post Captions
-    ↓
-[Wait 4 minutes]
-    ↓
 Spam Comments queues
     ↓
-Progress: Step 5/5 - Spam Comments
+Progress: Step 4/4 - Spam Comments
     ↓
 Sequence Complete! ✅
 ```

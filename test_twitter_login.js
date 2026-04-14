@@ -17,10 +17,10 @@ async function testTwitterLogin() {
         console.log('✅ Account created:', response.data.id);
         console.log('Account username:', response.data.username);
         
-        // Trigger warmUp action to start the login flow
-        console.log('\n🚀 Triggering warmUp action...');
+        // Trigger setupProfile action to start the login flow
+        console.log('\n🚀 Triggering setupProfile action...');
         const actionResponse = await axios.post(`http://localhost:4000/api/twitter-accounts/${response.data.id}/action`, {
-            action: 'warmUp'
+            action: 'setupProfile'
         });
 
         console.log('✅ Job queued:', actionResponse.data.jobId);
@@ -39,9 +39,9 @@ async function testTwitterLogin() {
                     const account = accounts.data[0];
                     console.log('Using account:', account.username, account.id);
                     
-                    console.log('\n🚀 Triggering warmUp action...');
+                    console.log('\n🚀 Triggering setupProfile action...');
                     const actionResponse = await axios.post(`http://localhost:4000/api/twitter-accounts/${account.id}/action`, {
-                        action: 'warmUp'
+                        action: 'setupProfile'
                     });
                     
                     console.log('✅ Job queued:', actionResponse.data.jobId);

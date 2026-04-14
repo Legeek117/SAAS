@@ -32,7 +32,7 @@ async function assignDefaultGroup() {
                 data: {
                     name: 'Default Group',
                     description: 'Groupe par défaut pour les comptes existants',
-                    taskType: 'warmup',
+                    taskType: 'engagement',
                     isActive: true,
                     userId: 'temp-user-id'
                 }

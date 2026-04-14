@@ -114,39 +114,6 @@ async function humanScroll(page: any) {
 }
 
 /**
- * Warm Up Logic (Refined for Anti-Ban)
- */
-async function warmUp(page: any, username: string) {
-    socket.emit('worker_log', { username, message: '🛡️ Warm Up "Human-Like" en cours...' });
-
-    // 1. Random Feed Interactions
-    for (let i = 0; i < randomRange(4, 7); i++) {
-        await humanMove(page);
-        await humanScroll(page);
-        if (Math.random() > 0.7) {
-            socket.emit('worker_log', { username, message: 'Liking a post in feed...' });
-            const hearts = await page.$$('svg[aria-label="Like"]');
-            if (hearts.length > 0) await hearts[randomRange(0, Math.min(2, hearts.length - 1))].click();
-            await sleep(randomRange(2000, 4000));
-        }
-    }
-
-    // 2. Story Watching (Deep simulation)
-    socket.emit('worker_log', { username, message: 'Simulation de visionnage de stories...' });
-    try {
-        await page.click('canvas', { timeout: 3000 }).catch(() => null);
-        const watchTime = randomRange(30, 50);
-        for (let s = 0; s < watchTime; s += 5) {
-            await sleep(5000);
-            socket.emit('worker_log', { username, message: `Watching stories... (${s}s/${watchTime}s)` });
-            if (Math.random() > 0.8) await page.keyboard.press('ArrowRight'); // Next story
-        }
-    } catch (e) { }
-
-    socket.emit('worker_log', { username, message: '✅ Cycle Human-Like terminé.' });
-}
-
-/**
  * Main Worker Logic
  */
 const worker = new Worker(
@@ -207,9 +174,13 @@ const worker = new Worker(
         const page = await context.newPage();
 
         // Fast Screenshot Interval for Dashboard
-        const screenshotInterval = setInterval(async () => {
+        const screenshotIntervalMs = process.env.SCREENSHOT_INTERVAL_MS
+            ? Math.max(2000, parseInt(process.env.SCREENSHOT_INTERVAL_MS, 10))
+            : 15000;
+        const enableScreenshots = process.env.ENABLE_SCREENSHOTS === 'true';
+        const screenshotInterval = enableScreenshots ? setInterval(async () => {
             try {
-                const screenshot = await page.screenshot({ type: 'jpeg', quality: 30 });
+                const screenshot = await page.screenshot({ type: 'jpeg', quality: 25 });
                 socket.emit('worker_screenshot', { username, image: screenshot.toString('base64') });
             } catch (e: any) {
                 // If it's a "Target closed" error, just stop the interval
@@ -219,7 +190,7 @@ const worker = new Worker(
                     debugLog(`⚠️ Screenshot fail for ${username}: ${e.message}`);
                 }
             }
-        }, 4000);
+        }, screenshotIntervalMs) : null;
 
         try {
             await page.goto('https://www.instagram.com', { waitUntil: 'networkidle' });
@@ -227,9 +198,7 @@ const worker = new Worker(
             // Safety: Random initial pause
             await sleep(randomRange(2000, 5000));
 
-            if (action === 'warmUp') {
-                await warmUp(page, username);
-            } else if (action === 'follow') {
+            if (action === 'follow') {
                 // Human-like follow logic here
                 socket.emit('worker_log', { username, message: 'Action : Follow Target...' });
                 // Simulation...
@@ -246,7 +215,7 @@ const worker = new Worker(
             socket.emit('worker_error', { username, message: error.message });
             throw error;
         } finally {
-            clearInterval(screenshotInterval);
+            if (screenshotInterval) clearInterval(screenshotInterval);
             await browser.close();
             socket.emit('worker_state', { username, state: 'IDLE' });
             await prisma.iGAccount.update({ where: { id: accountId }, data: { status: 'ACTIVE' } });
@@ -263,7 +232,7 @@ const twitterWorker = new Worker(
     twitterWorkerHandler,
     { 
         connection: redisConnection,
-        concurrency: process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY) : 20
+        concurrency: process.env.WORKER_CONCURRENCY ? parseInt(process.env.WORKER_CONCURRENCY) : 5
     }
 );
 
