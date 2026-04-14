@@ -1008,37 +1008,7 @@ async function retryAction(page: Page, emitLog: (msg: string) => void, actionFn:
     throw lastError;
 }
 
-// ─── Warm Up ──────────────────────────────────────────────────────────────────
-
-async function doWarmUp(page: Page, emitLog: (msg: string) => void, config?: any) {
-    emitLog("🔥 Warm Up : Navigation naturelle sur X (cible: OnlyFans/Adult content)...");
-    const durationSeconds = Math.max(30, Math.min(3600, parseInt(config?.durationSeconds, 10) || 120));
-    const endAt = Date.now() + (durationSeconds * 1000);
-
-    await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded' });
-    await sleep(randomRange(4000, 7000));
-    await humanScroll(page, randomRange(3, 6));
-
-    // Keep warm-up alive for the requested duration
-    while (Date.now() < endAt) {
-        await humanPause(page);
-        await humanWander(page);
-        await humanScroll(page, 1);
-
-        // Sometimes like a post - focus on model/adult content
-        if (Math.random() > 0.4) {
-            const likeBtns = await page.$$('[data-testid="like"]');
-            if (likeBtns.length > 0) {
-                const idx = randomRange(0, Math.min(likeBtns.length - 1, 4));
-                await sleep(randomRange(1500, 3500));
-                await humanClick(page, likeBtns[idx]);
-                emitLog(`❤️ Liked a post during warm up (OnlyFans niche)`);
-            }
-        }
-    }
-
-    emitLog("✅ Warm Up terminé.");
-}
+// Warm-up supprimé (désactivé pour réduire la consommation RAM/CPU et éviter les jobs inutiles).
 
 // ─── Auto Like ────────────────────────────────────────────────────────────────
 
@@ -2634,9 +2604,6 @@ export const twitterWorkerHandler = async (job: any) => {
         // ── Execute action ──
         emitLog(`⚡ Exécution de l'action : ${action}`);
         switch (action) {
-            case 'warmUp':
-                await doWarmUp(page, emitLog, config);
-                break;
             case 'setupProfile':
                 await doSetupProfile(page, emitLog, config);
                 break;

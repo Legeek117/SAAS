@@ -199,14 +199,14 @@ export default function Dashboard() {
     const [newCampaignPostsPerAcc, setNewCampaignPostsPerAcc] = useState(3);
     const [newCampaignCommentsPerPost, setNewCampaignCommentsPerPost] = useState(5);
     const [newCampaignGroupId, setNewCampaignGroupId] = useState('');
-    const [newCampaignType, setNewCampaignType] = useState<'POST' | 'WARMUP'>('POST');
+    const [newCampaignType, setNewCampaignType] = useState<'POST'>('POST');
     const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
     const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
     const [editCampaignForm, setEditCampaignForm] = useState({
         id: '',
         name: '',
         description: '',
-        type: 'POST' as 'POST' | 'WARMUP',
+        type: 'POST' as 'POST',
         groupId: '',
         targetCommunities: '',
         postsPerAccount: 3,
@@ -245,7 +245,7 @@ export default function Dashboard() {
     const [showProfileModal, setShowProfileModal] = useState(false);
     const [showCommentModal, setShowCommentModal] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<Account | null>(null);
-    const [newGroup, setNewGroup] = useState({ name: '', description: '', taskType: 'warmup' });
+    const [newGroup, setNewGroup] = useState({ name: '', description: '', taskType: 'engagement' });
     const [newTemplate, setNewTemplate] = useState({ name: '', content: '', type: 'post', hashtags: '' });
     const [newCommentRequest, setNewCommentRequest] = useState({ postUrl: '', totalComments: 0 });
     const [profileForm, setProfileForm] = useState({ profileImage: '', bio: '', bannerImage: '', niche: '' });
@@ -257,8 +257,6 @@ export default function Dashboard() {
     const [showLaunchModal, setShowLaunchModal] = useState(false);
     const [selectedLaunchCampaign, setSelectedLaunchCampaign] = useState<string | null>(null);
     const [launchInterval, setLaunchInterval] = useState({ value: 30, unit: 'MINUTES' });
-    const [warmupDuration, setWarmupDuration] = useState({ value: 90, unit: 'SECONDS' as 'SECONDS' | 'MINUTES' });
-    const [warmupFrequencyPerHour, setWarmupFrequencyPerHour] = useState(2);
 
     useEffect(() => {
         const storedToken = localStorage.getItem('ghost_token');
@@ -330,7 +328,7 @@ export default function Dashboard() {
                 name: newCampaignName,
                 description: newCampaignDesc,
                 type: newCampaignType,
-                groupId: newCampaignType === 'WARMUP' ? null : (newCampaignGroupId || null),
+                groupId: (newCampaignGroupId || null),
                 targetCommunities: newCampaignCommunities.split('\n').filter(l => l.trim()),
                 postsPerAccount: newCampaignPostsPerAcc.toString(),
                 commentsPerPost: newCampaignCommentsPerPost.toString()
@@ -359,7 +357,7 @@ export default function Dashboard() {
             id: c.id,
             name: c.name || '',
             description: c.description || '',
-            type: c.type === 'WARMUP' ? 'WARMUP' : 'POST',
+            type: 'POST',
             groupId: c.groupId || '',
             targetCommunities: Array.isArray(c.targetCommunities) ? c.targetCommunities.join('\n') : '',
             postsPerAccount: c.postsPerAccount ?? 3,
@@ -381,7 +379,7 @@ export default function Dashboard() {
                     name: editCampaignForm.name,
                     description: editCampaignForm.description,
                     type: editCampaignForm.type,
-                    groupId: editCampaignForm.type === 'WARMUP' ? null : (editCampaignForm.groupId || null),
+                    groupId: (editCampaignForm.groupId || null),
                     targetCommunities: editCampaignForm.targetCommunities.split('\n').map((l) => l.trim()).filter(Boolean),
                     postsPerAccount: editCampaignForm.postsPerAccount,
                     commentsPerPost: editCampaignForm.commentsPerPost
@@ -802,9 +800,9 @@ export default function Dashboard() {
             }, 2000);
         }
 
-        if (autoSequence && platform === 'TWITTER' && action === 'warmUp') {
-            const sequence = ['setupProfile', 'joinCommunity', 'postCommunity', 'spamComments'];
-            const delays = [60000, 120000, 180000, 240000]; 
+        if (autoSequence && platform === 'TWITTER' && action === 'setupProfile') {
+            const sequence = ['joinCommunity', 'postCommunity', 'spamComments'];
+            const delays = [60000, 120000, 180000];
             
             setAutoSequenceStatus(prev => ({
                 ...prev,
@@ -812,7 +810,7 @@ export default function Dashboard() {
                     running: true,
                     currentStep: 0,
                     totalSteps: sequence.length,
-                    currentAction: 'warmUp'
+                    currentAction: 'setupProfile'
                 }
             }));
             
@@ -2516,67 +2514,30 @@ export default function Dashboard() {
                                 <Play className="text-emerald-400" /> Paramètres de Lancement
                             </h2>
                             <p className="text-sm text-white/50 mb-6">
-                                {campaigns.find(c => c.id === selectedLaunchCampaign)?.type === 'WARMUP'
-                                    ? "Choisissez la fréquence de warm-up pour lancer tous les comptes MAIN."
-                                    : "Choisissez la fréquence à laquelle vos bots vont publier les posts de cette campagne."}
+                                Choisissez la fréquence à laquelle vos bots vont publier les posts de cette campagne.
                             </p>
 
                             <div className="space-y-6">
-                                {campaigns.find(c => c.id === selectedLaunchCampaign)?.type === 'WARMUP' ? (
-                                    <>
-                                        <div>
-                                            <label className="block text-xs uppercase tracking-wider font-semibold text-white/40 mb-2">Durée du warm-up</label>
-                                            <div className="flex gap-4">
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    value={warmupDuration.value}
-                                                    onChange={e => setWarmupDuration(prev => ({ ...prev, value: parseInt(e.target.value) || 1 }))}
-                                                    className="w-1/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500"
-                                                />
-                                                <select
-                                                    value={warmupDuration.unit}
-                                                    onChange={e => setWarmupDuration(prev => ({ ...prev, unit: e.target.value as 'SECONDS' | 'MINUTES' }))}
-                                                    className="w-2/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 appearance-none"
-                                                >
-                                                    <option value="SECONDS">Secondes</option>
-                                                    <option value="MINUTES">Minutes</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs uppercase tracking-wider font-semibold text-white/40 mb-2">Fréquence (cycles par heure)</label>
-                                            <input
-                                                type="number"
-                                                min="1"
-                                                value={warmupFrequencyPerHour}
-                                                onChange={e => setWarmupFrequencyPerHour(parseInt(e.target.value) || 1)}
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500"
-                                            />
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div>
-                                        <label className="block text-xs uppercase tracking-wider font-semibold text-white/40 mb-2">Fréquence de publication</label>
-                                        <div className="flex gap-4">
-                                            <input 
-                                                type="number" 
-                                                min="1"
-                                                value={launchInterval.value}
-                                                onChange={e => setLaunchInterval(prev => ({...prev, value: parseInt(e.target.value)}))}
-                                                className="w-1/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500"
-                                            />
-                                            <select 
-                                                value={launchInterval.unit}
-                                                onChange={e => setLaunchInterval(prev => ({...prev, unit: e.target.value}))}
-                                                className="w-2/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 appearance-none"
-                                            >
-                                                <option value="MINUTES">Minutes</option>
-                                                <option value="HOURS">Heures</option>
-                                            </select>
-                                        </div>
+                                <div>
+                                    <label className="block text-xs uppercase tracking-wider font-semibold text-white/40 mb-2">Fréquence de publication</label>
+                                    <div className="flex gap-4">
+                                        <input 
+                                            type="number" 
+                                            min="1"
+                                            value={launchInterval.value}
+                                            onChange={e => setLaunchInterval(prev => ({...prev, value: parseInt(e.target.value)}))}
+                                            className="w-1/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500"
+                                        />
+                                        <select 
+                                            value={launchInterval.unit}
+                                            onChange={e => setLaunchInterval(prev => ({...prev, unit: e.target.value}))}
+                                            className="w-2/3 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 appearance-none"
+                                        >
+                                            <option value="MINUTES">Minutes</option>
+                                            <option value="HOURS">Heures</option>
+                                        </select>
                                     </div>
-                                )}
+                                </div>
                                 
                                 <div className="flex gap-4 pt-4 border-t border-white/10">
                                     <button
@@ -2588,19 +2549,11 @@ export default function Dashboard() {
                                     <button
                                         onClick={async () => {
                                             try {
-                                                const selected = campaigns.find(c => c.id === selectedLaunchCampaign);
-                                                const payload = selected?.type === 'WARMUP'
-                                                    ? {
-                                                        isActive: true,
-                                                        warmupDurationValue: warmupDuration.value,
-                                                        warmupDurationUnit: warmupDuration.unit,
-                                                        warmupFrequencyPerHour: warmupFrequencyPerHour
-                                                    }
-                                                    : {
-                                                        isActive: true,
-                                                        intervalValue: launchInterval.value,
-                                                        intervalUnit: launchInterval.unit
-                                                    };
+                                                const payload = {
+                                                    isActive: true,
+                                                    intervalValue: launchInterval.value,
+                                                    intervalUnit: launchInterval.unit
+                                                };
                                                 await axios.post(`${API_BASE}/campaigns/${selectedLaunchCampaign}/toggle`, payload, { headers: { 'Authorization': `Bearer ${token}` }});
                                                 setShowLaunchModal(false);
                                                 fetchCampaigns();
@@ -2659,14 +2612,7 @@ export default function Dashboard() {
                             <div className="space-y-5">
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Type de campagne</label>
-                                    <select
-                                        value={newCampaignType}
-                                        onChange={(e) => setNewCampaignType(e.target.value as 'POST' | 'WARMUP')}
-                                        className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none px-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
-                                    >
-                                        <option value="POST">POST - Publication automatique</option>
-                                        <option value="WARMUP">WARMUP - Echauffement des comptes MAIN</option>
-                                    </select>
+                                    <input type="hidden" value="POST" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Nom de la campagne</label>
@@ -2680,24 +2626,22 @@ export default function Dashboard() {
                                         />
                                     </div>
                                 </div>
-                                {newCampaignType !== 'WARMUP' && (
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Assign to Group</label>
-                                        <div className="relative">
-                                            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><FolderTree size={16} /></div>
-                                            <select 
-                                                value={newCampaignGroupId} 
-                                                onChange={(e) => setNewCampaignGroupId(e.target.value)}
-                                                className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
-                                            >
-                                                <option value="">No Group (Global)</option>
-                                                {groups.map(g => (
-                                                    <option key={g.id} value={g.id}>{g.name}</option>
-                                                ))}
-                                            </select>
-                                        </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Assign to Group</label>
+                                    <div className="relative">
+                                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"><FolderTree size={16} /></div>
+                                        <select 
+                                            value={newCampaignGroupId} 
+                                            onChange={(e) => setNewCampaignGroupId(e.target.value)}
+                                            className="w-full bg-black/40 border border-white/10 focus:border-violet-500/50 outline-none pl-10 pr-4 py-3 rounded-xl text-sm transition-all text-white/90 focus:bg-white/[0.02] appearance-none"
+                                        >
+                                            <option value="">No Group (Global)</option>
+                                            {groups.map(g => (
+                                                <option key={g.id} value={g.id}>{g.name}</option>
+                                            ))}
+                                        </select>
                                     </div>
-                                )}
+                                </div>
 
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Liens des Communautés (Un par ligne)</label>
@@ -2773,17 +2717,7 @@ export default function Dashboard() {
                             <h3 className="text-2xl font-semibold mb-2">Modifier la campagne</h3>
                             <p className="text-sm text-white/40 mb-8">Nom, groupe, communautés et limites.</p>
                             <div className="space-y-5">
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Type</label>
-                                    <select
-                                        value={editCampaignForm.type}
-                                        onChange={(e) => setEditCampaignForm({ ...editCampaignForm, type: e.target.value as 'POST' | 'WARMUP' })}
-                                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white appearance-none"
-                                    >
-                                        <option value="POST">POST</option>
-                                        <option value="WARMUP">WARMUP</option>
-                                    </select>
-                                </div>
+                                <input type="hidden" value="POST" />
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Nom</label>
                                     <input
@@ -2800,21 +2734,19 @@ export default function Dashboard() {
                                         className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-sm text-white min-h-[72px]"
                                     />
                                 </div>
-                                {editCampaignForm.type !== 'WARMUP' && (
-                                    <div className="space-y-1.5">
-                                        <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Groupe</label>
-                                        <select
-                                            value={editCampaignForm.groupId}
-                                            onChange={(e) => setEditCampaignForm({ ...editCampaignForm, groupId: e.target.value })}
-                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white appearance-none"
-                                        >
-                                            <option value="">Global (aucun)</option>
-                                            {groups.map((g) => (
-                                                <option key={g.id} value={g.id}>{g.name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Groupe</label>
+                                    <select
+                                        value={editCampaignForm.groupId}
+                                        onChange={(e) => setEditCampaignForm({ ...editCampaignForm, groupId: e.target.value })}
+                                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-white appearance-none"
+                                    >
+                                        <option value="">Global (aucun)</option>
+                                        {groups.map((g) => (
+                                            <option key={g.id} value={g.id}>{g.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] uppercase font-semibold tracking-widest text-white/40 ml-1">Communautés (une URL ou ID par ligne)</label>
                                     <textarea
@@ -3230,7 +3162,6 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
 }) {
     const statusTheme = getStatusColor(account.status || 'IDLE');
     const actionLabels: Record<string, string> = {
-        warmUp: 'Warm Up',
         follow: 'Follow Target',
         postCommunity: 'Post Captions',
         spamComments: 'Spam Comments',
@@ -3239,14 +3170,13 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
 
     const platformActions = platform === 'TWITTER' ? [
         ...(account.type === 'MAIN' ? [
-            { id: 'warmUp', label: 'Day 1: Warm-up & Interaction'},
+            { id: 'setupProfile', label: 'Day 1: Setup Profile'},
             { id: 'follow', label: 'Day 2: Follow Targets'},
             { id: 'postCommunity', label: 'Day 3: Post Captions'},
         ] : []),
         { id: 'spamComments', label: account.type === 'SUPPORT' ? 'Day 4: Spam Comments (Support)' : 'Spam Comments'},
         { id: 'updateProfile', label: '🪪 Mettre à jour le Profil'}
     ] : [
-        { id: 'warmUp', label: 'Warm Up Account'},
         { id: 'follow', label: 'Follow Target'}
     ];
 
@@ -3349,7 +3279,7 @@ function AccountCard({ account, active, onClick, onLaunch, onEditProfile, index,
                                             <button 
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    onLaunch('warmUp', true);
+                                                    onLaunch('setupProfile', true);
                                                     setShowActions(false);
                                                 }}
                                                 className="px-3 py-2.5 text-left text-sm font-semibold bg-gradient-to-r from-violet-600/20 to-purple-600/20 hover:from-violet-600/30 hover:to-purple-600/30 text-violet-300 border border-violet-500/30 rounded-lg transition-all flex items-center gap-2"

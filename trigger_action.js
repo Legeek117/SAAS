@@ -11,10 +11,10 @@ async function triggerAction() {
         }
         
         const account = accounts.data[0];
-        console.log(`🚀 Triggering warmUp for ${account.username}...`);
+        console.log(`🚀 Triggering setupProfile for ${account.username}...`);
         
         const response = await axios.post(`http://localhost:4000/api/twitter-accounts/${account.id}/action`, {
-            action: 'warmUp'
+            action: 'setupProfile'
         });
         
         console.log('✅ Job queued:', response.data.jobId);

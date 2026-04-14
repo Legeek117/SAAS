@@ -58,7 +58,6 @@ app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 // Helper function to map action to stats field
 function getActivityField(action: string): string | null {
     const actionMap: Record<string, string> = {
-        'warmUp': 'tweetsPosted', // Count warmups as activity
         'autoPost': 'tweetsPosted',
         'autoLike': 'likesGiven',
         'autoComment': 'repliesGiven',
@@ -351,7 +350,7 @@ app.delete('/api/accounts/:id', authenticateToken, async (req: AuthRequest, res)
  */
 app.post('/api/accounts/:id/action', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
-    const { action } = req.body; // e.g., 'warmUp', 'follow'
+    const { action } = req.body; // e.g., 'follow'
 
     console.log(`[Backend] Received action request for Instagram account ${id}: ${action}`);
 
@@ -1278,9 +1277,9 @@ app.post('/api/campaigns', authenticateToken, async (req: AuthRequest, res) => {
             data: {
                 name,
                 description,
-                type: type === 'WARMUP' ? 'WARMUP' : 'POST',
+                type: 'POST',
                 userId,
-                groupId: type === 'WARMUP' ? null : (req.body.groupId || null),
+                groupId: (req.body.groupId || null),
                 postsPerAccount: postsPerAccount !== undefined ? parseInt(postsPerAccount) : 3,
                 commentsPerPost: commentsPerPost !== undefined ? parseInt(commentsPerPost) : 5,
                 totalCommentsQuota: totalCommentsQuota !== undefined ? parseInt(totalCommentsQuota) : 50,
@@ -1325,9 +1324,7 @@ const handleUpdateCampaign = async (req: AuthRequest, res: express.Response) => 
                 ...(totalCommentsQuota !== undefined && { totalCommentsQuota: parseInt(totalCommentsQuota) }),
                 ...(targetCommunities !== undefined && { targetCommunities }),
                 ...(isActive !== undefined && { isActive }),
-                ...(type === 'WARMUP'
-                    ? { groupId: null }
-                    : (req.body.groupId !== undefined && { groupId: req.body.groupId }))
+                ...(req.body.groupId !== undefined && { groupId: req.body.groupId })
             }
         });
         res.json(campaign);
@@ -1379,7 +1376,7 @@ app.post('/api/delete-campaign/:id', authenticateToken, handleDeleteCampaign);
  */
 app.post('/api/campaigns/:id/toggle', authenticateToken, async (req: AuthRequest, res) => {
     const { id } = req.params;
-    const { isActive, intervalValue, intervalUnit, warmupDurationValue, warmupDurationUnit, warmupFrequencyPerHour } = req.body;
+    const { isActive, intervalValue, intervalUnit } = req.body;
     const userId = req.user?.id;
 
     if (!userId) return res.status(401).json({ error: 'Non authentifié' });
@@ -1390,65 +1387,27 @@ app.post('/api/campaigns/:id/toggle', authenticateToken, async (req: AuthRequest
         });
         if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
-        const isWarmupCampaign = campaign.type === 'WARMUP';
-        const frequencyPerHour = Math.max(1, parseInt(warmupFrequencyPerHour, 10) || 1);
-        const warmupIntervalMinutes = Math.max(1, Math.floor(60 / frequencyPerHour));
-
         // Update campaign settings
         const updatedCampaign = await prisma.campaign.update({
             where: { id },
             data: { 
                 isActive,
-                ...(isWarmupCampaign
-                    ? {
-                        postIntervalValue: warmupIntervalMinutes,
-                        postIntervalUnit: 'MINUTES'
-                    }
-                    : {
-                        ...(intervalValue !== undefined && { postIntervalValue: parseInt(intervalValue, 10) }),
-                        ...(intervalUnit !== undefined && { postIntervalUnit: intervalUnit })
-                    })
+                ...(intervalValue !== undefined && { postIntervalValue: parseInt(intervalValue, 10) }),
+                ...(intervalUnit !== undefined && { postIntervalUnit: intervalUnit })
             }
         });
 
         // Toggle account auto mode based on campaign type/scope
-        if (isWarmupCampaign) {
-            await prisma.twitterAccount.updateMany({
-                where: { userId, type: 'MAIN' },
-                data: { autoMode: isActive }
-            });
-        } else if (updatedCampaign.groupId) {
+        if (updatedCampaign.groupId) {
             await prisma.twitterAccount.updateMany({
                 where: { groupId: updatedCampaign.groupId },
                 data: { autoMode: isActive }
             });
-        }
-
-        // Warmup campaigns: immediately queue warmup on all MAIN accounts
-        if (isActive && isWarmupCampaign) {
-            const warmupTargets = await prisma.twitterAccount.findMany({
-                where: {
-                    userId,
-                    type: 'MAIN'
-                }
+        } else {
+            await prisma.twitterAccount.updateMany({
+                where: { userId, type: 'MAIN' },
+                data: { autoMode: isActive }
             });
-
-            const durationValue = Math.max(1, parseInt(warmupDurationValue, 10) || 90);
-            const durationUnit = warmupDurationUnit === 'MINUTES' ? 'MINUTES' : 'SECONDS';
-            const warmupDurationSeconds = durationUnit === 'MINUTES' ? durationValue * 60 : durationValue;
-
-            for (const account of warmupTargets) {
-                await twitterQueue.add(`campaign-warmup-${account.username}-${Date.now()}`, {
-                    accountId: account.id,
-                    action: 'warmUp',
-                    username: account.username,
-                    campaignId: updatedCampaign.id,
-                    config: {
-                        durationSeconds: warmupDurationSeconds,
-                        frequencyPerHour
-                    }
-                });
-            }
         }
 
         if (isActive) {

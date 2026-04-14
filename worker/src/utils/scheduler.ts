@@ -92,8 +92,9 @@ class TwitterScheduler {
 
                 for (const account of accounts) {
                     // Check if account already has pending job
-                    const jobs = await this.queue.getJobs(['waiting', 'active']);
-                    const hasPendingJob = jobs.some(j => j.data.accountId === account.id);
+                    const jobId = `sched:group:${group.id}:${account.id}`;
+                    const existing = await this.queue.getJob(jobId);
+                    const hasPendingJob = !!existing;
                     
                     if (hasPendingJob) continue;
 
@@ -110,9 +111,12 @@ class TwitterScheduler {
                             groupName: group.name
                         },
                         {
+                            jobId,
                             delay: Math.floor(delay),
                             attempts: 2,
-                            backoff: { type: 'exponential', delay: 120000 } // 2 min backoff
+                            backoff: { type: 'exponential', delay: 120000 }, // 2 min backoff
+                            removeOnComplete: 1000,
+                            removeOnFail: 5000
                         }
                     );
                 }
@@ -152,22 +156,22 @@ class TwitterScheduler {
 
     private mapTaskTypeToAction(taskType: string): string {
         const mapping: Record<string, string> = {
-            'warmup': 'warmUp',
             'posting': 'autoPost',
             'commenting': 'autoComment',
             'engagement': 'autoLike',
             'following': 'autoFollow',
             'retweeting': 'autoRetweet'
         };
-        return mapping[taskType] || 'warmUp';
+        return mapping[taskType] || 'autoLike';
     }
 
     private async scheduleForAccount(account: any, now: Date) {
         const username = account.username;
         
         // Check if there's already a pending job for this account
-        const jobs = await this.queue.getJobs(['waiting', 'active']);
-        const hasPendingJob = jobs.some(j => j.data.accountId === account.id);
+        const jobId = `sched:${account.id}`;
+        const existing = await this.queue.getJob(jobId);
+        const hasPendingJob = !!existing;
         
         if (hasPendingJob) return;
 
@@ -200,9 +204,12 @@ class TwitterScheduler {
                 config: this.getActionConfig(action)
             },
             {
+                jobId,
                 delay: Math.floor(delay),
                 attempts: 2,
-                backoff: { type: 'exponential', delay: 120000 } // 2 min backoff
+                backoff: { type: 'exponential', delay: 120000 }, // 2 min backoff
+                removeOnComplete: 1000,
+                removeOnFail: 5000
             }
         );
 
@@ -220,7 +227,6 @@ class TwitterScheduler {
         if (hour >= 2 && hour <= 7) return null;
 
         const actions = [
-            { name: 'warmUp', weight: 25 },
             { name: 'autoLike', weight: 30 },
             { name: 'autoFollow', weight: 20 },
             { name: 'autoComment', weight: 15 },
@@ -255,7 +261,7 @@ class TwitterScheduler {
             if (random <= 0) return action.name;
         }
         
-        return 'warmUp';
+        return 'autoLike';
     }
 
     private getActionConfig(action: string): any {
