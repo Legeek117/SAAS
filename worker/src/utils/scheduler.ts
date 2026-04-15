@@ -92,7 +92,7 @@ class TwitterScheduler {
 
                 for (const account of accounts) {
                     // Check if account already has pending job
-                    const jobId = `sched:group:${group.id}:${account.id}`;
+                    const jobId = `sched-group-${group.id}-${account.id}`;
                     const existing = await this.queue.getJob(jobId);
                     const hasPendingJob = !!existing;
                     
@@ -169,7 +169,7 @@ class TwitterScheduler {
         const username = account.username;
         
         // Check if there's already a pending job for this account
-        const jobId = `sched:${account.id}`;
+        const jobId = `sched-account-${account.id}`;
         const existing = await this.queue.getJob(jobId);
         const hasPendingJob = !!existing;
         
