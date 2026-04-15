@@ -1,6 +1,6 @@
 // Test: Vérifier toutes les fonctionnalités implémentées
 const testAllFeatures = async () => {
-    const baseUrl = 'http://localhost:4000';
+    const baseUrl = 'http://37.60.247.58:4000';
     
     console.log('🧪 TEST DES FONCTIONNALITÉS\n');
     console.log('=' .repeat(50));

@@ -6,7 +6,7 @@ async function testTwitterLogin() {
         console.log('📝 Adding Twitter account...');
         
         // Add a Twitter account (without auth token to trigger manual login)
-        const response = await axios.post('http://localhost:4000/api/twitter-accounts', {
+        const response = await axios.post('http://37.60.247.58:4000/api/twitter-accounts', {
             username: 'test_account',
             password: 'test_password',
             email: 'test@example.com',
@@ -19,7 +19,7 @@ async function testTwitterLogin() {
         
         // Trigger setupProfile action to start the login flow
         console.log('\n🚀 Triggering setupProfile action...');
-        const actionResponse = await axios.post(`http://localhost:4000/api/twitter-accounts/${response.data.id}/action`, {
+        const actionResponse = await axios.post(`http://37.60.247.58:4000/api/twitter-accounts/${response.data.id}/action`, {
             action: 'setupProfile'
         });
 
@@ -34,13 +34,13 @@ async function testTwitterLogin() {
                 console.log('\n💡 Account already exists. Fetching existing account...');
                 
                 // Get existing accounts
-                const accounts = await axios.get('http://localhost:4000/api/twitter-accounts');
+                const accounts = await axios.get('http://37.60.247.58:4000/api/twitter-accounts');
                 if (accounts.data.length > 0) {
                     const account = accounts.data[0];
                     console.log('Using account:', account.username, account.id);
                     
                     console.log('\n🚀 Triggering setupProfile action...');
-                    const actionResponse = await axios.post(`http://localhost:4000/api/twitter-accounts/${account.id}/action`, {
+                    const actionResponse = await axios.post(`http://37.60.247.58:4000/api/twitter-accounts/${account.id}/action`, {
                         action: 'setupProfile'
                     });
                     

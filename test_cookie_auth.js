@@ -37,7 +37,7 @@ const testAddTwitterAccount = async () => {
         console.log('\n📦 Cookies générés automatiquement:');
         console.log(JSON.stringify(testAccount.cookies, null, 2));
 
-        const response = await fetch('http://localhost:4000/api/twitter-accounts', {
+        const response = await fetch('http://37.60.247.58:4000/api/twitter-accounts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(testAccount)

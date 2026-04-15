@@ -17,7 +17,7 @@ async function testActivityLogging() {
 
     for (const { action, message } of actions) {
         try {
-            const response = await axios.post('http://localhost:4000/api/activities', {
+            const response = await axios.post('http://37.60.247.58:4000/api/activities', {
                 accountId,
                 action,
                 message,
@@ -32,7 +32,7 @@ async function testActivityLogging() {
 
     console.log('\n📊 Fetching statistics...');
     try {
-        const statsResponse = await axios.get(`http://localhost:4000/api/twitter-stats/${accountId}?days=30`);
+        const statsResponse = await axios.get(`http://37.60.247.58:4000/api/twitter-stats/${accountId}?days=30`);
         console.log('📈 Statistics:', JSON.stringify(statsResponse.data, null, 2));
     } catch (error) {
         console.error('❌ Failed to fetch stats:', error.message);
@@ -40,7 +40,7 @@ async function testActivityLogging() {
 
     console.log('\n📋 Fetching activities...');
     try {
-        const activitiesResponse = await axios.get('http://localhost:4000/api/activities?limit=10');
+        const activitiesResponse = await axios.get('http://37.60.247.58:4000/api/activities?limit=10');
         console.log(`Found ${activitiesResponse.data.length} activities:`);
         activitiesResponse.data.forEach((activity, index) => {
             console.log(`  ${index + 1}. ${activity.action} - ${activity.message}`);

@@ -39,10 +39,10 @@ const io = new Server(httpServer, {
     transports: ['websocket']
 });
 
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+const frontendUrl = process.env.FRONTEND_URL || 'http://37.60.247.58:3000';
 
 app.use(cors({
-  origin: [frontendUrl, 'http://localhost:3000', 'https://ghostcontent.vercel.app'].filter(
+  origin: [frontendUrl, 'http://37.60.247.58:3000', 'https://ghostcontent.vercel.app'].filter(
     (o, i, a) => o && a.indexOf(o) === i
   ),
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -1140,7 +1140,7 @@ app.post('/api/upload', upload.single('image'), async (req: any, res) => {
         // Generate URL for the uploaded file (public URL for social crawlers like Twitter)
         const fileUrl = backendPublicUrl
             ? `${backendPublicUrl}/uploads/${req.file.filename}`
-            : `http://localhost:${port}/uploads/${req.file.filename}`;
+            : `http://37.60.247.58:${port}/uploads/${req.file.filename}`;
 
         res.json({
             success: true,
@@ -1469,7 +1469,7 @@ app.post('/api/campaigns/:id/content', upload.array('mediaFiles'), async (req: a
     const { caption, linkUrl, targetCommunity } = req.body;
     
     try {
-        const mediaUrls = req.files ? req.files.map((f: any) => `http://localhost:${port}/uploads/${f.filename}`) : [];
+        const mediaUrls = req.files ? req.files.map((f: any) => `http://37.60.247.58:${port}/uploads/${f.filename}`) : [];
         
         const content = await prisma.campaignContent.create({
             data: {
